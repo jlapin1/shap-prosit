@@ -329,7 +329,7 @@ val = val[perm[BGD_SZ:]]
 
 sc = ShapCalculator(ION, val, bgd)
 
-for INDEX in range(val.shape[0]):
+for INDEX in range(int(sys.argv[1]), int(sys.argv[1])+int(sys.argv[2]), 1):#val.shape[0], 1):
     print("\r%d/%d"%(INDEX, len(val)), end='\n')
 
     out_dict = sc.calc_shap_values(INDEX, samp=Samp)
