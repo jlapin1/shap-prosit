@@ -1,8 +1,13 @@
-import shap
-import tensorflow as tf
+import sys
+
+import os
+from typing import Union
 import numpy as np
-from numpy.typing import NDArray
+import tensorflow as tf
 from dlomix.models import PrositIntensityPredictor
+from numpy.typing import NDArray
+
+import shap
 
 
 class ShapCalculator:
@@ -177,7 +182,7 @@ class ShapCalculator:
             return False
 
         # Input coalition vector: All aa's on (1) + charge + eV
-        # - Padded amino acids are added in as all ones (always on) in EnsPred
+        # - Padded amino acids are added in as all ones (always on) in ens_pred
         inpvec = np.ones((1, pl + 2))
 
         # Mask vector is peptide length all off
@@ -188,7 +193,7 @@ class ShapCalculator:
         orig_spec = self.ens_pred(inpvec, mask=False)[:, self.ion_ind]
 
         # SHAP Explainer
-        ex = shap.KernelExplainer(self.score, maskvec)
+        ex = shap.KernelExplainer(self.Score, maskvec)
         ex.fnull = self.fnull
         ex.expected_value = ex.fnull
 
@@ -217,9 +222,28 @@ class ShapCalculator:
             f.write(" ".join(["%s" % m for m in shap_values.squeeze()]) + "\n")
 
 
-def main():
-    pass  # TODO
+def save_shap_values(
+    val_data_path: Union[str, bytes, os.PathLike], ion: str, bgd_sz: int = 100
+):
+
+    # Shuffle validation dataset and split it in background and validation.
+    val_data = np.genfromtxt(val_data_path, delimiter=",")
+    perm = np.random.permutation(np.arange(len(val_data)))
+    np.savetxt("perm.txt", perm, fmt="%d")
+    perm = np.loadtxt("perm.txt").astype(int)
+    bgd = val[perm[:bgd_sz]]
+    val = val[perm[bgd_sz:]]
+
+    sc = ShapCalculator(ion, val, bgd)
+
+    for INDEX in range(
+        int(sys.argv[1]), int(sys.argv[1]) + int(sys.argv[2]), 1
+    ):  # val.shape[0], 1):
+        print("\r%d/%d" % (INDEX, len(val)), end="\n")
+        out_dict = sc.calc_shap_values(INDEX, samp=1000)
+        if out_dict != False:
+            sc.write_shap_values(out_dict)
 
 
 if __name__ == "__main__":
-    main()
+    save_shap_values(val_data_path="val_inps.csv", ion="b7+1")

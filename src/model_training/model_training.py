@@ -8,7 +8,7 @@ from dlomix.losses import masked_spectral_distance
 from dlomix.models import PrositIntensityPredictor
 
 
-class IntensityModelTrainer:  # TODO: class is unnecessary, one method would be enought, intensity dataset must be provided
+class IntensityModelTrainer:
     """Class for training of intensity model."""
 
     def __init__(
@@ -61,13 +61,25 @@ class IntensityModelTrainer:  # TODO: class is unnecessary, one method would be 
 
 
 def main():
-    """Main script to train and save the model."""
+    """Main script to train and save the model. Also saves validation set."""
 
     trainer = IntensityModelTrainer(
         data_path="./intensity_data.csv", seq_len=30, batch_size=64
     )
     model = trainer.train_model(epochs=20)
     model.save_weights("saved_model/savedmodel")
+
+    # Generate background dataset and save to the file.
+    inps = []
+    for i in trainer.intdata.val_data:
+        charges = i[0]["precursor_charge"].numpy().argmax(1) + 1
+        for j in range(i[0]["sequence"].shape[0]):
+            csseq = ",".join([k.numpy().decode("utf-8") for k in i[0]["sequence"][j]])
+            ce = i[0]["collision_energy"][j].numpy()[0]
+            inp = csseq + ",%.2f,%d" % (ce, charges[j])
+            inps.append(inp)
+    with open("val_inps.csv", "w") as f:
+        f.write("\n".join(inps))
 
 
 if __name__ == "__main__":
