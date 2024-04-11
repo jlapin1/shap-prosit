@@ -1,9 +1,10 @@
-import sys
-
 import os
+import sys
 from typing import Union
+
 import numpy as np
 import tensorflow as tf
+import yaml
 from dlomix.models import PrositIntensityPredictor
 from numpy.typing import NDArray
 
@@ -193,7 +194,7 @@ class ShapCalculator:
         orig_spec = self.ens_pred(inpvec, mask=False)[:, self.ion_ind]
 
         # SHAP Explainer
-        ex = shap.KernelExplainer(self.Score, maskvec)
+        ex = shap.KernelExplainer(self.score, maskvec)
         ex.fnull = self.fnull
         ex.expected_value = ex.fnull
 
@@ -213,37 +214,58 @@ class ShapCalculator:
 
         return {"int": inten, "sv": shap_values.squeeze()[:pl], "seq": seqrep}
 
-    def write_shap_values(self, out_dict, path="output.txt"):
+    def write_shap_values(self, out_dict, path):
         inten = out_dict["int"]
         shap_values = out_dict["sv"]
         seqrep = out_dict["seq"]
-        with open(path, "a", encoding="utf-8") as f:
+        with open(path + "/output.txt", "a", encoding="utf-8") as f:
             f.write(seqrep + " %f\n" % inten)
             f.write(" ".join(["%s" % m for m in shap_values.squeeze()]) + "\n")
 
 
 def save_shap_values(
-    val_data_path: Union[str, bytes, os.PathLike], ion: str, bgd_sz: int = 100
+    val_data_path: Union[str, bytes, os.PathLike],
+    model_path: Union[str, bytes, os.PathLike],
+    ion: str,
+    output_path: Union[str, bytes, os.PathLike] = ".",
+    perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
+    samp: int = 1000,
+    bgd_sz: int = 100,
 ):
 
     # Shuffle validation dataset and split it in background and validation.
-    val_data = np.genfromtxt(val_data_path, delimiter=",")
-    perm = np.random.permutation(np.arange(len(val_data)))
-    np.savetxt("perm.txt", perm, fmt="%d")
-    perm = np.loadtxt("perm.txt").astype(int)
-    bgd = val[perm[:bgd_sz]]
-    val = val[perm[bgd_sz:]]
+    val_data = np.array([m.split(",") for m in open(val_data_path).read().split("\n")])
+    if perm_path is None:
+        perm = np.random.permutation(np.arange(len(val_data)))
+        np.savetxt(output_path + "/perm.txt", perm, fmt="%d")
+    else:
+        perm = np.loadtxt(perm_path).astype(int)
+    bgd = val_data[perm[:bgd_sz]]
+    val = val_data[perm[bgd_sz:]]
 
-    sc = ShapCalculator(ion, val, bgd)
+    model = PrositIntensityPredictor(seq_length=30)
+    latest = tf.train.latest_checkpoint(model_path)
+    model.load_weights(latest)
 
-    for INDEX in range(
-        int(sys.argv[1]), int(sys.argv[1]) + int(sys.argv[2]), 1
-    ):  # val.shape[0], 1):
+    sc = ShapCalculator(ion, val, bgd, model=model)
+
+    for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
-        out_dict = sc.calc_shap_values(INDEX, samp=1000)
+        out_dict = sc.calc_shap_values(INDEX, samp=samp)
         if out_dict != False:
-            sc.write_shap_values(out_dict)
+            sc.write_shap_values(out_dict, output_path)
 
 
 if __name__ == "__main__":
-    save_shap_values(val_data_path="val_inps.csv", ion="b7+1")
+    with open(sys.argv[1], encoding="utf-8") as file:
+        config = yaml.safe_load(file)["shap_calculator"]
+
+    save_shap_values(
+        val_data_path=config["val_inps_path"],
+        model_path=config["model_path"],
+        ion=config["ion"],
+        perm_path=config["perm_path"],
+        output_path=config["ion"],
+        samp=config["samp"],
+        bgd_sz=config["bgd_sz"],
+    )

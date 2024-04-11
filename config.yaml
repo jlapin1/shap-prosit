@@ -1,0 +1,7 @@
+shap_calculator:
+  val_inps_path: val_inps.csv
+  model_path: saved_model
+  ion: y2+1
+  perm_path: y2+1/perm.txt   # Path or leave empty to generate and save new permutation
+  samp: 1000
+  bgd_sz: 100
