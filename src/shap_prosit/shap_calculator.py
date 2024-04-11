@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from typing import Union
@@ -9,6 +10,8 @@ from dlomix.models import PrositIntensityPredictor
 from numpy.typing import NDArray
 
 import shap
+
+tf.get_logger().setLevel(logging.ERROR)
 
 
 class ShapCalculator:
