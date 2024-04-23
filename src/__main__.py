@@ -24,3 +24,4 @@ if __name__ == "__main__":
 
     visualization = ShapVisualization(config["ion"] + "/output.txt")
     visualization.full_report(save=config["ion"])
+    visualization.clustering(config["shap_visualization"])
