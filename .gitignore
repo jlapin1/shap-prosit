@@ -160,3 +160,4 @@ cython_debug/
 #.idea/
 .vscode/launch.json
 clustering.ipynb
+run_script.sh
