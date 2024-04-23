@@ -1,11 +1,13 @@
 import os
 import sys
+from pathlib import Path
 from typing import Union
 
-from matplotlib.pylab import norm
 import numpy as np
+import yaml
 from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
+from sklearn.cluster import Birch
 
 MIN_OCCUR_AVG = 300
 MIN_OCCUR_HEAT = 15
@@ -26,13 +28,12 @@ class ShapVisualization:
         sequences = list(lines[::2])
         svs = list(lines[1::2])
 
-        # Not used now, but can be used in future
-        # pred_intensities = [float(line.split()[-1]) for line in sequences]
-        # charge = [int(line.split()[-2]) for line in sequences]
-        # energy = [float(line.split()[-3]) for line in sequences]
-        seq_list = [line.split()[:-3] for line in sequences]
+        self.pred_intensities = [float(line.split()[-1]) for line in sequences]
+        self.charge = [int(line.split()[-2]) for line in sequences]
+        self.energy = [float(line.split()[-3]) for line in sequences]
+        self.seq_list = [line.split()[:-3] for line in sequences]
 
-        shap_values_list = [[float(m) for m in line.split()] for line in svs]
+        self.shap_values_list = [[float(m) for m in line.split()] for line in svs]
 
         self.count_positions = np.zeros((30))
         self.sv_sum_from_left = np.zeros((30))
@@ -51,7 +52,7 @@ class ShapVisualization:
         self.amino_acid_pos_sv_sum_from_left = {}
         self.amino_acid_pos_sv_sum_from_right = {}
 
-        for sequence, shap_values in zip(seq_list, shap_values_list):
+        for sequence, shap_values in zip(self.seq_list, self.shap_values_list):
             seq = np.array(sequence)
             sv = np.array(shap_values)
 
@@ -178,6 +179,61 @@ class ShapVisualization:
                 abs(shap_values[-combo[0]]) + abs(shap_values[-combo[1]])
             )
             self.combo_sv_sum[i][tok].append(sum(shap_values))
+
+    def clustering(self, config: dict):
+        number_of_aas = config["clustering"]["number_of_aa"]
+        if config["clustering"]["from_which_end"] == "left":
+            cluster_aa = np.array(
+                [sequence[:number_of_aas] for sequence in self.seq_list]
+            )
+            cluster_sv = np.array(
+                [shap_values[:number_of_aas] for shap_values in self.shap_values_list]
+            )
+        else:
+            cluster_aa = np.array(
+                [sequence[-number_of_aas:] for sequence in self.seq_list]
+            )
+            cluster_sv = np.array(
+                [shap_values[-number_of_aas:] for shap_values in self.shap_values_list]
+            )
+
+        clustering = Birch(threshold=0.2).fit_predict(cluster_sv)
+        unique, counts = np.unique(clustering, return_counts=True)
+
+        for cluster in np.asarray((unique)):
+            os.makedirs(
+                str(Path(config["sv_path"]).parent.absolute()) + f"/cluster_{cluster}",
+                exist_ok=True,
+            )
+
+        for i in range(len(cluster_aa)):
+            with open(
+                str(Path(config["sv_path"]).parent.absolute())
+                + f"/cluster_{clustering[i]}/output.txt",
+                "a",
+                encoding="utf-8",
+            ) as f:
+                f.write(
+                    " ".join(cluster_aa[i])
+                    + f" {self.energy[i]:.2f} {self.charge[i]} {self.pred_intensities[i]}\n"
+                )
+                f.write(" ".join(["%s" % m for m in cluster_sv[i]]) + "\n")
+
+        for cluster in np.asarray((unique)):
+            visualization = ShapVisualization(
+                str(Path(config["sv_path"]).parent.absolute())
+                + f"/cluster_{cluster}/output.txt",
+                [
+                    [0, number_of_aas - 1],
+                    [1, number_of_aas - 2],
+                    [0, 1],
+                    [number_of_aas - 2, number_of_aas - 1],
+                ],
+            )
+            visualization.full_report(
+                save=str(Path(config["sv_path"]).parent.absolute())
+                + f"/cluster_{cluster}"
+            )
 
     def aa_only_plot(self, save=False):
         plt.close("all")
@@ -370,5 +426,8 @@ class ShapVisualization:
 
 
 if __name__ == "__main__":
-    visualization = ShapVisualization(sys.argv[1])
-    visualization.full_report(save=".")
+    with open(sys.argv[1], encoding="utf-8") as file:
+        config = yaml.safe_load(file)["shap_visualization"]
+    visualization = ShapVisualization(config["sv_path"])
+    visualization.full_report(save=str(Path(config["sv_path"]).parent.absolute()))
+    visualization.clustering(config)
