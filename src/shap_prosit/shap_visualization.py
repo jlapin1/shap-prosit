@@ -15,7 +15,7 @@ MIN_OCCUR_HEAT = 15
 
 class ShapVisualization:
     def __init__(
-        self, sv_path: Union[str, bytes, os.PathLike], position_combos: list = None
+        self, sv_path: Union[str, bytes, os.PathLike], ion: str, position_combos: list = None
     ) -> None:
         if position_combos is None:
             self.position_combos = [[1, 9], [8, 9], [9, 10], [1, 10]]
@@ -52,6 +52,9 @@ class ShapVisualization:
         self.amino_acid_pos_sv_sum_from_left = {}
         self.amino_acid_pos_sv_sum_from_right = {}
 
+        self.amino_acid_pos_from_break = {}
+        self.amino_acid_pos_sv_sum_from_from_break = {}
+
         for sequence, shap_values in zip(self.seq_list, self.shap_values_list):
             seq = np.array(sequence)
             sv = np.array(shap_values)
@@ -74,7 +77,7 @@ class ShapVisualization:
                 self.amino_acids_sv[am_ac].append(sh_value)
 
                 # Define token as position from left end
-                tok_le = f"{am_ac}-{i}"
+                tok_le = f"{am_ac}_{i}"
                 if tok_le not in self.amino_acid_pos_from_left:
                     self.amino_acid_pos_from_left[tok_le] = []
                 if tok_le not in self.amino_acid_pos_sv_sum_from_left:
@@ -84,7 +87,7 @@ class ShapVisualization:
                 self.amino_acid_pos_sv_sum_from_left[tok_le].append(sum(sv))
 
                 # Define token as position from right end
-                tok_re = f"{am_ac}-{le - i - 1}"
+                tok_re = f"{am_ac}_{le - i - 1}"
                 if tok_re not in self.amino_acid_pos_from_right:
                     self.amino_acid_pos_from_right[tok_re] = []
                 if tok_re not in self.amino_acid_pos_sv_sum_from_right:
@@ -92,6 +95,16 @@ class ShapVisualization:
                 # Store values for token in list
                 self.amino_acid_pos_from_right[tok_re].append(sh_value)
                 self.amino_acid_pos_sv_sum_from_right[tok_re].append(sum(sv))
+
+                # Define new coordinate (position 0 is ion end, negativ values are outside the ion, positive - in)
+                tok_c = f"{am_ac}_{i + int(ion[1]) - le}" if ion[0] == "y" else f"{am_ac}_{int(ion[1]) - i - 1}"
+                if tok_c not in self.amino_acid_pos_from_break:
+                    self.amino_acid_pos_from_break[tok_c] = []
+                if tok_c not in self.amino_acid_pos_sv_sum_from_from_break:
+                    self.amino_acid_pos_sv_sum_from_from_break[tok_c] = []
+                # Store values for token in list
+                self.amino_acid_pos_from_break[tok_c].append(sh_value)
+                self.amino_acid_pos_sv_sum_from_from_break[tok_c].append(sum(sv))
 
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
 
@@ -149,6 +162,11 @@ class ShapVisualization:
             tok: np.mean(np.abs(self.amino_acid_pos_from_right[tok]))
             for tok in self.amino_acid_pos_from_right.keys()
             if len(self.amino_acid_pos_from_right[tok]) > MIN_OCCUR_HEAT
+        }
+        self.amino_acid_pos_abs_avg_from_break = {
+            tok: np.mean(np.abs(self.amino_acid_pos_from_break[tok])) 
+            for tok in self.amino_acid_pos_from_break.keys()
+            if len(self.amino_acid_pos_from_break[tok])> MIN_OCCUR_HEAT
         }
 
     def __bi_token_combo(self, sequence, shap_values):
