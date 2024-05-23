@@ -6,7 +6,7 @@ shap_calculator:
   samp: 1000
   bgd_sz: 100
 shap_visualization:
-  sv_path: y2+1/output.txt
+  sv_path: data/y5/output.txt
   clustering:
     from_which_end: right
     number_of_aa: 5

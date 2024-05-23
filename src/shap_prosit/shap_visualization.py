@@ -4,13 +4,16 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
+import seaborn as sns
 import yaml
+import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
-from sklearn.cluster import Birch
+from sklearn.cluster import Birch, KMeans
+from sklearn.decomposition import PCA
 
-MIN_OCCUR_AVG = 300
-MIN_OCCUR_HEAT = 15
+MIN_OCCUR_AVG = 100
+MIN_OCCUR_HEAT = 5
 
 
 class ShapVisualization:
@@ -23,7 +26,7 @@ class ShapVisualization:
             self.position_combos = position_combos
 
         with open(sv_path) as f:
-            lines = np.array(f.read().split("\n"))[:-1]
+            lines = np.array(f.read().split("\n"))[1:-1]
 
         sequences = list(lines[::2])
         svs = list(lines[1::2])
@@ -183,30 +186,55 @@ class ShapVisualization:
     def clustering(self, config: dict):
         number_of_aas = config["clustering"]["number_of_aa"]
         if config["clustering"]["from_which_end"] == "left":
-            cluster_aa = np.array(
-                [sequence[:number_of_aas] for sequence in self.seq_list]
-            )
             cluster_sv = np.array(
                 [shap_values[:number_of_aas] for shap_values in self.shap_values_list]
             )
         else:
-            cluster_aa = np.array(
-                [sequence[-number_of_aas:] for sequence in self.seq_list]
-            )
             cluster_sv = np.array(
                 [shap_values[-number_of_aas:] for shap_values in self.shap_values_list]
             )
 
-        clustering = Birch(threshold=0.2).fit_predict(cluster_sv)
+        clustering = KMeans(n_clusters=3).fit_predict(cluster_sv)
         unique, counts = np.unique(clustering, return_counts=True)
 
+        data = PCA().fit_transform(cluster_sv)
+        plt.close("all")
+        scatter = plt.scatter(
+            data[:, 0], data[:, 1], marker=".", c=clustering, cmap="rainbow"
+        )
+        plt.legend(*scatter.legend_elements(), title="Clusters")
+        plt.savefig(
+            str(Path(config["sv_path"]).parent.absolute()) + "/clustering.png",
+            bbox_inches="tight",
+        )
+
+        # Create folders for clusters
         for cluster in np.asarray((unique)):
             os.makedirs(
                 str(Path(config["sv_path"]).parent.absolute()) + f"/cluster_{cluster}",
                 exist_ok=True,
             )
 
-        for i in range(len(cluster_aa)):
+        # Write header for clusters' output.txt
+        for cluster in np.asarray((unique)):
+            with open(
+                str(Path(config["sv_path"]).parent.absolute())
+                + f"/cluster_{cluster}/output.txt",
+                "w",
+                encoding="utf-8",
+            ) as f:
+                mean_cluster_sv = np.mean(
+                    np.array(self.pred_intensities)[np.where(clustering == cluster)[0]]
+                )
+                cluster_len = len(
+                    np.array(self.pred_intensities)[np.where(clustering == cluster)[0]]
+                )
+                f.write(
+                    f"Length of the cluster: {cluster_len}, Cluster mean intensity: {mean_cluster_sv}\n"
+                )
+
+        # Write sequences and shap values in files
+        for i in range(len(cluster_sv)):
             with open(
                 str(Path(config["sv_path"]).parent.absolute())
                 + f"/cluster_{clustering[i]}/output.txt",
@@ -214,11 +242,12 @@ class ShapVisualization:
                 encoding="utf-8",
             ) as f:
                 f.write(
-                    " ".join(cluster_aa[i])
+                    " ".join(self.seq_list[i])
                     + f" {self.energy[i]:.2f} {self.charge[i]} {self.pred_intensities[i]}\n"
                 )
-                f.write(" ".join(["%s" % m for m in cluster_sv[i]]) + "\n")
+                f.write(" ".join(["%s" % m for m in self.shap_values_list[i]]) + "\n")
 
+        # Create plots for output.txt in clusters
         for cluster in np.asarray((unique)):
             visualization = ShapVisualization(
                 str(Path(config["sv_path"]).parent.absolute())
@@ -266,15 +295,15 @@ class ShapVisualization:
         )
         axes[3].set_xlim([-0.5, 19.5])
         for ax in axes:
-            ax.set_xticks(np.arange(20))
+            ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_xticklabels(self.amino_acids_sorted, size=8)
         for ax in axes[[1, 3]]:
             ax.set_yticks([])
             ax.set_yticklabels([])
-        fig.colorbar(im).ax.set_yscale("linear")
-        fig.colorbar(im2).ax.set_yscale("linear")
+        fig.colorbar(im, ax=axes[:2]).ax.set_yscale("linear")
+        fig.colorbar(im2, ax=axes[2:]).ax.set_yscale("linear")
         if save is not False:
-            plt.savefig(save + "/aa_only_plot.png")
+            plt.savefig(save + "/aa_only_plot.png", bbox_inches="tight")
         else:
             plt.show()
 
@@ -309,7 +338,7 @@ class ShapVisualization:
         fig.colorbar(im3).ax.set_yscale("linear")
         fig.colorbar(im4).ax.set_yscale("linear")
         if save is not False:
-            plt.savefig(save + "/position_only_plot.png")
+            plt.savefig(save + "/position_only_plot.png", bbox_inches="tight")
         else:
             plt.show()
 
@@ -352,7 +381,7 @@ class ShapVisualization:
             axes[2, 1].set_title("mean(sv) from right end")
             im6 = axes[2, 1].imshow(heatmap_re, cmap="RdBu_r", norm=TwoSlopeNorm(0))
             for ax in axes.flatten():
-                ax.set_yticks(np.arange(20))
+                ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
                 ax.set_yticklabels(self.amino_acids_sorted, size=6)
                 ax.set_xticks(np.arange(30))
                 ax.set_xticklabels(np.arange(30), size=6)
@@ -363,7 +392,7 @@ class ShapVisualization:
             fig.colorbar(im5).ax.set_yscale("linear")
             fig.colorbar(im6).ax.set_yscale("linear")
             if save is not False:
-                plt.savefig(save + "/position_heatmap.png")
+                plt.savefig(save + "/position_heatmap.png", bbox_inches="tight")
             else:
                 plt.show()
 
@@ -374,10 +403,10 @@ class ShapVisualization:
         fig.set_figwidth(17)
 
         for ax in axes.flatten():
-            ax.set_yticks(np.arange(20))
+            ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_yticklabels(self.amino_acids_sorted, size=6)
             ax.set_ylabel("AA(N)")
-            ax.set_xticks(np.arange(20))
+            ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_xticklabels(self.amino_acids_sorted, size=6)
             ax.set_xlabel("AA(C)")
 
@@ -414,7 +443,75 @@ class ShapVisualization:
             fig.colorbar(im3, shrink=0.7).ax.set_yscale("linear")
 
         if save is not False:
-            plt.savefig(save + "/aa_heatmap.png")
+            plt.savefig(save + "/aa_heatmap.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+    def swarmplot(self, save=False):
+        # sorted_amino_acids_sv_keys = sorted(
+        #     self.amino_acids_sv,
+        #     key=lambda key: len(self.amino_acids_sv[key]),
+        #     reverse=True,
+        # )
+
+        fig, axs = plt.subplots(ncols=2)
+        fig.set_figwidth(15)
+        fig.set_figheight(8)
+
+        data_right = {"shap_value": [], "amino_acid": [], "position": []}
+        for key, values in self.amino_acid_pos_from_right.items():
+            data_right["shap_value"].extend(values)
+            data_right["amino_acid"].extend([key[0]] * len(values))
+            data_right["position"].extend([int(key[2:])] * len(values))
+
+        plot_right = sns.stripplot(
+            data=data_right,
+            order=self.amino_acids_sorted,
+            x="shap_value",
+            y="amino_acid",
+            size=3,
+            jitter=0.4,
+            hue="position",
+            palette="RdBu_r",
+            legend=False,
+            ax=axs[0],
+        )
+
+        cmap_right = plt.get_cmap("RdBu_r")
+        norm_right = plt.Normalize(0, max(data_right["position"]))
+        sm_right = matplotlib.cm.ScalarMappable(norm=norm_right, cmap=cmap_right)
+        sm_right.set_array([])
+        cbar_right = fig.colorbar(sm_right, ax=plot_right, shrink=0.7)
+        cbar_right.set_label("Position from right")
+
+        data_left = {"shap_value": [], "amino_acid": [], "position": []}
+        for key, values in self.amino_acid_pos_from_left.items():
+            data_left["shap_value"].extend(values)
+            data_left["amino_acid"].extend([key[0]] * len(values))
+            data_left["position"].extend([int(key[2:])] * len(values))
+
+        plot_left = sns.stripplot(
+            data=data_left,
+            order=self.amino_acids_sorted,
+            x="shap_value",
+            y="amino_acid",
+            size=3,
+            jitter=0.4,
+            hue="position",
+            palette="RdBu_r",
+            legend=False,
+            ax=axs[1],
+        )
+
+        cmap_left = plt.get_cmap("RdBu_r")
+        norm_left = plt.Normalize(0, max(data_left["position"]))
+        sm_left = matplotlib.cm.ScalarMappable(norm=norm_left, cmap=cmap_left)
+        sm_left.set_array([])
+        cbar_left = fig.colorbar(sm_left, ax=plot_left, shrink=0.7)
+        cbar_left.set_label("Position from left")
+
+        if save is not False:
+            plt.savefig(save + "/swarmplot.png", bbox_inches="tight")
         else:
             plt.show()
 
@@ -423,6 +520,7 @@ class ShapVisualization:
         self.position_only_plot(save=save)
         self.position_heatmap(save=save)
         self.aa_heatmap(save=save)
+        self.swarmplot(save=save)
 
 
 if __name__ == "__main__":
@@ -430,4 +528,4 @@ if __name__ == "__main__":
         config = yaml.safe_load(file)["shap_visualization"]
     visualization = ShapVisualization(config["sv_path"])
     visualization.full_report(save=str(Path(config["sv_path"]).parent.absolute()))
-    visualization.clustering(config)
+    # visualization.clustering(config)
