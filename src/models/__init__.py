@@ -1,1 +1,1 @@
-from .model_training import train_model
+from .transformer_model import TransformerModel

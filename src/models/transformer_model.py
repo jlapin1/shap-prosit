@@ -2,7 +2,7 @@ import tensorflow as tf
 
 K = tf.keras
 L = K.layers
-import models.model_parts as mp
+from . import model_parts as mp
 from tensorflow.keras.layers.experimental import preprocessing
 
 ALPHABET_UNMOD = {

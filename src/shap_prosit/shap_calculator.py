@@ -11,6 +11,10 @@ from numpy.typing import NDArray
 
 import shap
 
+sys.path.append(os.getcwd())
+
+from src.models.model_wrappers import ModelWrapper, model_wrappers
+
 tf.get_logger().setLevel(logging.ERROR)
 
 
@@ -20,7 +24,7 @@ class ShapCalculator:
         ion: str,
         dset: NDArray,
         bgd: NDArray,
-        model: PrositIntensityPredictor,
+        model_wrapper: ModelWrapper,
         max_sequence_length: int = 30,
         max_charge: int = 6,
     ):
@@ -28,39 +32,19 @@ class ShapCalculator:
         self.bgd = bgd
         self.max_len = max_sequence_length
         self.max_charge = max_charge
-        self.model = model
+        self.model_wrapper = model_wrapper
 
         self.bgd_sz = bgd.shape[0]
-        self.ion_ind = self.annotations()[ion]
+
+        # TODO unsafe method, change for regex
         self.ext = int(ion[1])
+
         self.fnull = np.array(
-            [
-                self.model(self.hx(bgd), training=False)[:, self.ion_ind]
-                .numpy()
-                .squeeze()
-                .mean()
-            ]
+            [self.model_wrapper.make_prediction(self.hx(bgd)).squeeze().mean()]
         )
 
         self.savepep = []
         self.savecv = []
-
-    def annotations(self):
-        """Generate dictionary with ion ids.
-
-        Returns:
-            dict: Ion ids dictionary.
-        """
-        ions = {}
-        count = 0
-        for i in np.arange(1, self.max_len):
-            for j in ["y", "b"]:
-                for k in [1, 2, 3]:
-                    ion = f"{j}{i}+{k}"
-                    ions[ion] = count
-                    count += 1
-
-        return ions
 
     @tf.function
     def mask_pep(self, zs, pep, bgd_inds, mask=True):
@@ -159,7 +143,7 @@ class ShapCalculator:
             inp = self.hx(self.mask_pep(batch, self.inp_orig, bgd_inds, mask))
 
             # Run through model
-            out = self.model(inp, training=False)
+            out = self.model_wrapper.make_prediction(inp)
             out_.append(out)
 
         out_ = tf.concat(out_, axis=0)
@@ -168,7 +152,7 @@ class ShapCalculator:
 
     def score(self, peptide, mask=True):
         shape = tf.shape(peptide)
-        x_ = self.ens_pred(peptide, mask=mask)[:, self.ion_ind]
+        x_ = self.ens_pred(peptide, mask=mask)
         score = tf.squeeze(x_).numpy()
         if shape[0] == 1:
             score = np.array([score])[None, :]
@@ -194,7 +178,7 @@ class ShapCalculator:
         maskvec = np.zeros((self.bgd_sz, pl + 2))
         maskvec[:, -2:] = 1
 
-        orig_spec = self.ens_pred(inpvec, mask=False)[:, self.ion_ind]
+        orig_spec = self.ens_pred(inpvec, mask=False)
 
         # SHAP Explainer
         ex = shap.KernelExplainer(self.score, maskvec)
@@ -228,7 +212,7 @@ class ShapCalculator:
 
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
-    model_path: Union[str, bytes, os.PathLike],
+    model_wrapper: ModelWrapper,
     ion: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
@@ -246,11 +230,7 @@ def save_shap_values(
     bgd = val_data[perm[:bgd_sz]]
     val = val_data[perm[bgd_sz:]]
 
-    model = PrositIntensityPredictor(seq_length=30)
-    latest = tf.train.latest_checkpoint(model_path)
-    model.load_weights(latest)
-
-    sc = ShapCalculator(ion, val, bgd, model=model)
+    sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
 
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
@@ -263,9 +243,13 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
 
+    model_wrapper = model_wrappers[config["model_type"]](
+        path=config["model_path"], ion=config["ion"]
+    )
+
     save_shap_values(
         val_data_path=config["val_inps_path"],
-        model_path=config["model_path"],
+        model_wrapper=model_wrapper,
         ion=config["ion"],
         perm_path=config["perm_path"],
         output_path=config["ion"],
