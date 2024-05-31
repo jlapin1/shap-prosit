@@ -528,4 +528,4 @@ if __name__ == "__main__":
         config = yaml.safe_load(file)["shap_visualization"]
     visualization = ShapVisualization(config["sv_path"])
     visualization.full_report(save=str(Path(config["sv_path"]).parent.absolute()))
-    # visualization.clustering(config)
+    visualization.clustering(config)
