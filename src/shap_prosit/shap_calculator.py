@@ -230,19 +230,27 @@ def save_shap_values(
     val = val_data[perm[bgd_sz:]]
 
     sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
+
+    bgd_pred = model_wrapper.make_prediction(sc.hx(bgd))
+    bgd_mean = np.mean(bgd_pred)
+
     result = {
         "sequence": [],
         "shap_values": [],
         "intensity": [],
         "energy": [],
         "charge": [],
+        "bgd_mean": [],
     }
-    for INDEX in range(500):
+    for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         out_dict = sc.calc_shap_values(INDEX, samp=samp)
         if out_dict != False:
             for key, value in result.items():
-                value.append(out_dict[key])
+                if key == "bgd_mean":
+                    value.append(bgd_mean)
+                else:
+                    value.append(out_dict[key])
     pd.DataFrame(result).to_parquet(
         output_path + "/output.parquet.gzip", compression="gzip"
     )
