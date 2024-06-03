@@ -3,15 +3,18 @@ import sys
 from pathlib import Path
 from typing import Union
 
+import matplotlib
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import yaml
-import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 from sklearn.cluster import Birch, KMeans
 from sklearn.decomposition import PCA
+from operator import itemgetter
 
+matplotlib.use("Agg")
 MIN_OCCUR_AVG = 100
 MIN_OCCUR_HEAT = 5
 
@@ -25,18 +28,14 @@ class ShapVisualization:
         else:
             self.position_combos = position_combos
 
-        with open(sv_path) as f:
-            lines = np.array(f.read().split("\n"))[1:-1]
+        df = pd.read_parquet(sv_path)
 
-        sequences = list(lines[::2])
-        svs = list(lines[1::2])
+        self.pred_intensities = df["intensity"].tolist()
+        self.charge = df["charge"].tolist()
+        self.energy = df["energy"].tolist()
+        self.seq_list = df["sequence"].tolist()
 
-        self.pred_intensities = [float(line.split()[-1]) for line in sequences]
-        self.charge = [int(line.split()[-2]) for line in sequences]
-        self.energy = [float(line.split()[-3]) for line in sequences]
-        self.seq_list = [line.split()[:-3] for line in sequences]
-
-        self.shap_values_list = [[float(m) for m in line.split()] for line in svs]
+        self.shap_values_list = df["shap_values"].tolist()
 
         self.count_positions = np.zeros((30))
         self.sv_sum_from_left = np.zeros((30))
@@ -215,11 +214,11 @@ class ShapVisualization:
                 exist_ok=True,
             )
 
-        # Write header for clusters' output.txt
+        # Write info about clusters
         for cluster in np.asarray((unique)):
             with open(
                 str(Path(config["sv_path"]).parent.absolute())
-                + f"/cluster_{cluster}/output.txt",
+                + f"/cluster_{cluster}/info.txt",
                 "w",
                 encoding="utf-8",
             ) as f:
@@ -234,24 +233,37 @@ class ShapVisualization:
                 )
 
         # Write sequences and shap values in files
-        for i in range(len(cluster_sv)):
-            with open(
+        for cluster in np.asarray((unique)):
+            output = {
+                "sequence": list(
+                    itemgetter(*np.where(clustering == cluster)[0])(self.seq_list)
+                ),
+                "shap_values": list(
+                    itemgetter(*np.where(clustering == cluster)[0])(
+                        self.shap_values_list
+                    )
+                ),
+                "intensity": list(
+                    np.array(self.pred_intensities)[np.where(clustering == cluster)[0]]
+                ),
+                "energy": list(
+                    np.array(self.energy)[np.where(clustering == cluster)[0]]
+                ),
+                "charge": list(
+                    np.array(self.charge)[np.where(clustering == cluster)[0]]
+                ),
+            }
+            pd.DataFrame(output).to_parquet(
                 str(Path(config["sv_path"]).parent.absolute())
-                + f"/cluster_{clustering[i]}/output.txt",
-                "a",
-                encoding="utf-8",
-            ) as f:
-                f.write(
-                    " ".join(self.seq_list[i])
-                    + f" {self.energy[i]:.2f} {self.charge[i]} {self.pred_intensities[i]}\n"
-                )
-                f.write(" ".join(["%s" % m for m in self.shap_values_list[i]]) + "\n")
+                + f"/cluster_{cluster}/output.parquet.gzip",
+                compression="gzip",
+            )
 
         # Create plots for output.txt in clusters
         for cluster in np.asarray((unique)):
             visualization = ShapVisualization(
                 str(Path(config["sv_path"]).parent.absolute())
-                + f"/cluster_{cluster}/output.txt",
+                + f"/cluster_{cluster}/output.parquet.gzip",
                 [
                     [0, number_of_aas - 1],
                     [1, number_of_aas - 2],

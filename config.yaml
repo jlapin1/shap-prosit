@@ -3,11 +3,11 @@ shap_calculator:
   model_path: saved_model/save_small
   model_type: transformer
   ion: b3+1
-  perm_path: b3+1_samp1000/perm.txt # Path or leave empty to generate and save new permutation
-  samp: 50
+  perm_path: # Path or leave empty to generate and save new permutation
+  samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: b3+1_samp50/output.txt
+  sv_path: data/b3+1/output.parquet.gzip
   clustering:
     from_which_end: right
     number_of_aa: 5

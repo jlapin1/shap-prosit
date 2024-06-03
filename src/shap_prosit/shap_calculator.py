@@ -3,6 +3,7 @@ import os
 import sys
 from typing import Union
 
+import pandas as pd
 import numpy as np
 import tensorflow as tf
 import yaml
@@ -187,7 +188,7 @@ class ShapCalculator:
 
         # Calculate the SHAP values
         seq = list(inp_orig.squeeze())
-        seqrep = " ".join(seq[:pl]) + " " + " ".join(seq[-2:])
+        seqrep = seq[:pl]
         # print(seqrep)
         inten = float(orig_spec.numpy().squeeze())
         # print("Calculated intensity: %f"%inten)
@@ -199,15 +200,13 @@ class ShapCalculator:
         # print('%c: %10f'%(i,j))
         # print(np.sum(shap_values))
 
-        return {"int": inten, "sv": shap_values.squeeze()[:pl], "seq": seqrep}
-
-    def write_shap_values(self, out_dict, path):
-        inten = out_dict["int"]
-        shap_values = out_dict["sv"]
-        seqrep = out_dict["seq"]
-        with open(path + "/output.txt", "a", encoding="utf-8") as f:
-            f.write(seqrep + " %f\n" % inten)
-            f.write(" ".join(["%s" % m for m in shap_values.squeeze()]) + "\n")
+        return {
+            "intensity": inten,
+            "shap_values": shap_values.squeeze()[:pl],
+            "sequence": seqrep,
+            "energy": float(seq[-2]),
+            "charge": int(seq[-1]),
+        }
 
 
 def save_shap_values(
@@ -231,17 +230,30 @@ def save_shap_values(
     val = val_data[perm[bgd_sz:]]
 
     sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
-
-    for INDEX in range(val.shape[0]):
+    result = {
+        "sequence": [],
+        "shap_values": [],
+        "intensity": [],
+        "energy": [],
+        "charge": [],
+    }
+    for INDEX in range(500):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         out_dict = sc.calc_shap_values(INDEX, samp=samp)
         if out_dict != False:
-            sc.write_shap_values(out_dict, output_path)
+            for key, value in result.items():
+                value.append(out_dict[key])
+    pd.DataFrame(result).to_parquet(
+        output_path + "/output.parquet.gzip", compression="gzip"
+    )
 
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
+
+    if not os.path.exists(config["ion"]):
+        os.makedirs(config["ion"])
 
     model_wrapper = model_wrappers[config["model_type"]](
         path=config["model_path"], ion=config["ion"]
