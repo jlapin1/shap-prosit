@@ -7,7 +7,7 @@ shap_calculator:
   samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: data/b3+1/output.parquet.gzip
+  sv_path: data/b4+1/output.parquet.gzip
   clustering:
     from_which_end: right
-    number_of_aa: 5
+    number_of_aa: 6
