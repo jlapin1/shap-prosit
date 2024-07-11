@@ -2,6 +2,8 @@ import os
 from abc import ABC, abstractmethod
 from typing import Union
 
+from koinapy import Koina
+import pandas as pd
 import numpy as np
 import tensorflow as tf
 import yaml
@@ -9,6 +11,22 @@ from dlomix.models import PrositIntensityPredictor
 from numpy import ndarray
 
 from . import TransformerModel
+
+
+@tf.function
+def hx(self, tokens):
+    sequence = tokens[:, :-2]
+    collision_energy = tf.strings.to_number(tokens[:, -2:-1])
+    precursor_charge = tf.one_hot(
+        tf.cast(tf.strings.to_number(tokens[:, -1]), tf.int32) - 1, self.max_charge
+    )
+    z = {
+        "sequence": sequence,
+        "collision_energy": collision_energy,
+        "precursor_charge": precursor_charge,
+    }
+
+    return z
 
 
 def annotations(max_len: int = 30):
@@ -35,8 +53,8 @@ class ModelWrapper(ABC):
         pass
 
     @abstractmethod
-    def make_prediction(self, input: dict) -> ndarray:
-        """Make prediction from input dictionary containing
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+        """Make prediction from input array containing
         sequences, precursor charges and collision energy."""
         pass
 
@@ -48,24 +66,47 @@ class PrositIntensityWrapper(ModelWrapper):
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
 
-    def make_prediction(self, input: dict) -> ndarray:
-        return (self.model(input, training=False)[:, self.ion_ind]).numpy()
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+        return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
 
 
 class TransformerIntensityWrapper(ModelWrapper):
     def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
         self.ion_ind = annotations()[ion]
-        with open(os.path.join(path, "model.yaml"), encoding="utf-8") as file:
-            model_config = yaml.safe_load(file)
-        self.model = TransformerModel(**model_config)
+        self.model = PrositIntensityPredictor(seq_length=30)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
 
-    def make_prediction(self, input: dict) -> ndarray:
-        return (self.model(input, training=False)[:, self.ion_ind]).numpy()
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+        return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
+
+
+class KoinaWrapper(ModelWrapper):
+    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+        self.model = Koina(path)
+        self.ion = ion
+
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+        sequences = []
+        for i in inputs[:, :-2]:
+            try:
+                seq = "".join(i)
+            except:
+                seq = b"".join(i).decode("utf-8")
+            sequences.append(seq)
+        input_dict = {
+            "peptide_sequences": np.array(sequences),
+            "precursor_charges": inputs[:, -2].astype("float"),
+            "collision_energies": inputs[:, -1].astype("float"),
+        }
+        preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-1.0)
+        return preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+            "intensities"
+        ].to_numpy()
 
 
 model_wrappers = {
     "prosit": PrositIntensityWrapper,
     "transformer": TransformerIntensityWrapper,
+    "koina": KoinaWrapper,
 }

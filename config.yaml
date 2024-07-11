@@ -1,8 +1,8 @@
 shap_calculator:
   val_inps_path: val_inps.csv
-  model_path: saved_model/save_small
-  model_type: transformer
-  ion: b4+2
+  model_path: Prosit_2019_intensity
+  model_type: koina
+  ion: b4+1
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
