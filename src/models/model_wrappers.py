@@ -99,10 +99,18 @@ class KoinaWrapper(ModelWrapper):
             "precursor_charges": inputs[:, -2].astype("float"),
             "collision_energies": inputs[:, -1].astype("float"),
         }
-        preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-1.0)
-        return preds[preds["annotation"] == bytes(self.ion, "utf-8")][
-            "intensities"
-        ].to_numpy()
+        preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
+        if len(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]) < len(sequences):
+            print(sequences[0])
+            results = []
+            for i in range(len(sequences)):
+                if i not in preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].index:
+                    results.append(0.0)
+                else:
+                    results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
+        else:
+            results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
+        return results
 
 
 model_wrappers = {

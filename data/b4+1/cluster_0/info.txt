@@ -1,1 +1,5 @@
+<<<<<<< HEAD
 Length of the cluster: 968, Cluster mean intensity: 0.027005929787625695
+=======
+Length of the cluster: 2898, Cluster mean intensity: 0.18006515181509836
+>>>>>>> 9624039b2b0792d69137ccbbb78ffa69edfc91e2
