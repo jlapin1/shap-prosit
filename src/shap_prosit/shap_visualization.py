@@ -325,6 +325,9 @@ class ShapVisualization:
             -1,
         )
         for ax in axes:
+            ax.axvline(
+                x=int(self.ion[1:].split("+")[0]) - 0.5, color="black", linewidth=3
+            )
             ax.set_yticks([])
             ax.set_yticklabels([])
             ax.set_xticks(np.arange(30))
@@ -367,6 +370,9 @@ class ShapVisualization:
             -1,
         )
         for ax in axes:
+            ax.axvline(
+                x=int(self.ion[1:].split("+")[0]) - 0.5, color="black", linewidth=3
+            )
             ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_yticklabels(self.amino_acids_sorted, size=6)
             ax.set_xticks(np.arange(30))
@@ -453,6 +459,7 @@ class ShapVisualization:
             legend=True,
             ax=ax,
         )
+        plt.axvline(x=0, color="black", linewidth=4)
 
         # cmap = plt.get_cmap("RdBu_r")
         # norm = plt.Normalize(min(data["position"]), max(data["position"]))
