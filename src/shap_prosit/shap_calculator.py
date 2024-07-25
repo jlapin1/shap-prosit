@@ -37,8 +37,7 @@ class ShapCalculator:
 
         self.bgd_sz = bgd.shape[0]
 
-        # TODO unsafe method, change for regex
-        self.ext = int(ion[1])
+        self.ext = int(ion[1:].split("+")[0])
 
         self.fnull = np.array(
             [self.model_wrapper.make_prediction(bgd).squeeze().mean()]

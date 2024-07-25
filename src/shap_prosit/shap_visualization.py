@@ -1,5 +1,6 @@
 import os
 import sys
+from operator import itemgetter
 from pathlib import Path
 from typing import Union
 
@@ -12,47 +13,48 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 from sklearn.cluster import Birch, KMeans
 from sklearn.decomposition import PCA
-from operator import itemgetter
 
 matplotlib.use("Agg")
 MIN_OCCUR_AVG = 100
-MIN_OCCUR_HEAT = 5
+MIN_OCCUR_HEAT = 15
 
 
 class ShapVisualization:
     def __init__(
-        self, sv_path: Union[str, bytes, os.PathLike], position_combos: list = None
+        self,
+        sv_path: Union[str, bytes, os.PathLike],
+        ion: str,
+        position_combos: list | None = None,
     ) -> None:
         if position_combos is None:
-            self.position_combos = [[1, 9], [8, 9], [9, 10], [1, 10]]
+            self.position_combos = [
+                [0, -1],
+                [int(ion[1:].split("+")[0]) - 1, 0],
+                [int(ion[1:].split("+")[0]) - 1, -1],
+            ]
         else:
             self.position_combos = position_combos
 
         df = pd.read_parquet(sv_path)
+        self.ion = ion
 
+        # Get data from dataframe
         self.pred_intensities = df["intensity"].tolist()
         self.charge = df["charge"].tolist()
         self.energy = df["energy"].tolist()
         self.seq_list = df["sequence"].tolist()
-
         self.shap_values_list = df["shap_values"].tolist()
 
+        # Initialize data structures
         self.count_positions = np.zeros((30))
-        self.sv_sum_from_left = np.zeros((30))
-        self.sv_sum_from_right = np.zeros((30))
-
-        self.sv_abs_sum_from_left = np.zeros((30))
-        self.sv_abs_sum_from_right = np.zeros((30))
-
+        self.sv_sum = np.zeros((30))
+        self.sv_abs_sum = np.zeros((30))
         self.combo_pos_sv_sum = []
         self.combo_pos_sv_abs_sum = []
-        self.combo_sv_sum = []
-
+        self.combo_inten = []
         self.amino_acids_sv = {}
-        self.amino_acid_pos_from_left = {}
-        self.amino_acid_pos_from_right = {}
-        self.amino_acid_pos_sv_sum_from_left = {}
-        self.amino_acid_pos_sv_sum_from_right = {}
+        self.amino_acid_pos = {}
+        self.amino_acid_pos_inten = {}
 
         for sequence, shap_values in zip(self.seq_list, self.shap_values_list):
             seq = np.array(sequence)
@@ -60,55 +62,49 @@ class ShapVisualization:
 
             le = len(seq)
             self.count_positions += np.append(np.ones((le)), np.zeros((30 - le)))
-            self.sv_sum_from_left[:le] += sv
-            self.sv_sum_from_right[:le] += sv[::-1]
 
-            self.sv_abs_sum_from_left[:le] += abs(sv)
-            self.sv_abs_sum_from_right[:le] += abs(sv[::-1])
+            # Gather sum and abs sum of SV in each position
+            if self.ion[0] == "y":  # Reverse string for y-ion
+                self.sv_sum[:le] += sv[::-1]
+                self.sv_abs_sum[:le] += abs(sv[::-1])
+            else:
+                self.sv_sum[:le] += sv
+                self.sv_abs_sum[:le] += abs(sv)
 
             self.__bi_token_combo(seq, sv)
 
             for i, (am_ac, sh_value) in enumerate(zip(seq, sv)):
 
-                # Store amino acid sv in list
+                # Store SV for each AA
                 if am_ac not in self.amino_acids_sv:
                     self.amino_acids_sv[am_ac] = []
                 self.amino_acids_sv[am_ac].append(sh_value)
 
-                # Define token as position from left end
-                tok_le = f"{am_ac}-{i}"
-                if tok_le not in self.amino_acid_pos_from_left:
-                    self.amino_acid_pos_from_left[tok_le] = []
-                if tok_le not in self.amino_acid_pos_sv_sum_from_left:
-                    self.amino_acid_pos_sv_sum_from_left[tok_le] = []
-                # Store values for token in list
-                self.amino_acid_pos_from_left[tok_le].append(sh_value)
-                self.amino_acid_pos_sv_sum_from_left[tok_le].append(sum(sv))
+                # Create token for AA and position
+                # 0 is the first index in ion, positives are inside ion
+                # negatives are outside of ion
+                tok_c = (
+                    f"{am_ac}_{i + int(self.ion[1:].split('+')[0]) - le}"
+                    if self.ion[0] == "y"
+                    else f"{am_ac}_{int(self.ion[1:].split('+')[0]) - i - 1}"
+                )
 
-                # Define token as position from right end
-                tok_re = f"{am_ac}-{le - i - 1}"
-                if tok_re not in self.amino_acid_pos_from_right:
-                    self.amino_acid_pos_from_right[tok_re] = []
-                if tok_re not in self.amino_acid_pos_sv_sum_from_right:
-                    self.amino_acid_pos_sv_sum_from_right[tok_re] = []
+                # Check if token already in dictionary
+                if tok_c not in self.amino_acid_pos:
+                    self.amino_acid_pos[tok_c] = []
+                if tok_c not in self.amino_acid_pos_inten:
+                    self.amino_acid_pos_inten[tok_c] = []
+
                 # Store values for token in list
-                self.amino_acid_pos_from_right[tok_re].append(sh_value)
-                self.amino_acid_pos_sv_sum_from_right[tok_re].append(sum(sv))
+                self.amino_acid_pos[tok_c].append(sh_value)
+                self.amino_acid_pos_inten[tok_c].append(sum(sv))
 
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
 
-        self.sv_avg_from_left = self.sv_sum_from_left / (self.count_positions + 1e-9)
-        self.sv_avg_from_left *= self.count_positions > MIN_OCCUR_AVG
-        self.sv_avg_from_right = self.sv_sum_from_right / (self.count_positions + 1e-9)
-        self.sv_avg_from_right *= self.count_positions > MIN_OCCUR_AVG
-        self.sv_abs_avg_from_left = self.sv_abs_sum_from_left / (
-            self.count_positions + 1e-9
-        )
-        self.sv_abs_avg_from_left *= self.count_positions > MIN_OCCUR_AVG
-        self.sv_abs_avg_from_right = self.sv_abs_sum_from_right / (
-            self.count_positions + 1e-9
-        )
-        self.sv_abs_avg_from_right *= self.count_positions > MIN_OCCUR_AVG
+        self.sv_avg = self.sv_sum / (self.count_positions + 1e-9)
+        self.sv_avg *= self.count_positions > MIN_OCCUR_AVG
+        self.sv_abs_avg = self.sv_abs_sum / (self.count_positions + 1e-9)
+        self.sv_abs_avg *= self.count_positions > MIN_OCCUR_AVG
 
         self.amino_acids_abs_avg_sv = {
             a: np.mean(np.abs(self.amino_acids_sv[a])) for a in self.amino_acids_sorted
@@ -122,65 +118,59 @@ class ShapVisualization:
 
         # AA-position heatmaps
         # Consolidate lists of values into single values for each token
-        self.amino_acid_pos_sv_sum_from_left = {
-            tok: np.mean(self.amino_acid_pos_sv_sum_from_left[tok])
-            for tok in self.amino_acid_pos_sv_sum_from_left.keys()
-            if len(self.amino_acid_pos_sv_sum_from_left[tok]) > MIN_OCCUR_HEAT
+        self.amino_acid_pos_inten = {
+            tok: np.mean(self.amino_acid_pos_inten[tok])
+            for tok in self.amino_acid_pos_inten.keys()
+            if len(self.amino_acid_pos_inten[tok]) > MIN_OCCUR_HEAT
         }
-        self.amino_acid_pos_avg_from_left = {
-            tok: np.mean(self.amino_acid_pos_from_left[tok])
-            for tok in self.amino_acid_pos_from_left.keys()
-            if len(self.amino_acid_pos_from_left) > MIN_OCCUR_HEAT
+        self.amino_acid_pos_avg = {
+            tok: np.mean(self.amino_acid_pos[tok])
+            for tok in self.amino_acid_pos.keys()
+            if len(self.amino_acid_pos) > MIN_OCCUR_HEAT
         }
-        self.amino_acid_pos_abs_avg_from_left = {
-            tok: np.mean(np.abs(self.amino_acid_pos_from_left[tok]))
-            for tok in self.amino_acid_pos_from_left.keys()
-            if len(self.amino_acid_pos_from_left) > MIN_OCCUR_HEAT
-        }
-        self.amino_acid_pos_sv_sum_from_right = {
-            tok: np.mean(self.amino_acid_pos_sv_sum_from_right[tok])
-            for tok in self.amino_acid_pos_sv_sum_from_right.keys()
-            if len(self.amino_acid_pos_sv_sum_from_right[tok]) > MIN_OCCUR_HEAT
-        }
-        self.amino_acid_pos_avg_from_right = {
-            tok: np.mean(self.amino_acid_pos_from_right[tok])
-            for tok in self.amino_acid_pos_from_right.keys()
-            if len(self.amino_acid_pos_from_right[tok]) > MIN_OCCUR_HEAT
-        }
-        self.amino_acid_pos_abs_avg_from_right = {
-            tok: np.mean(np.abs(self.amino_acid_pos_from_right[tok]))
-            for tok in self.amino_acid_pos_from_right.keys()
-            if len(self.amino_acid_pos_from_right[tok]) > MIN_OCCUR_HEAT
+        self.amino_acid_pos_abs_avg = {
+            tok: np.mean(np.abs(self.amino_acid_pos[tok]))
+            for tok in self.amino_acid_pos.keys()
+            if len(self.amino_acid_pos) > MIN_OCCUR_HEAT
         }
 
     def __bi_token_combo(self, sequence, shap_values):
         for i, combo in enumerate(self.position_combos):
-            # Add new dictionary, if there more combos
+            # Append new dictionary
             if i >= len(self.combo_pos_sv_sum):
                 self.combo_pos_sv_sum.append({})
                 self.combo_pos_sv_abs_sum.append({})
-                self.combo_sv_sum.append({})
+                self.combo_inten.append({})
 
-            if combo[0] >= len(sequence) or combo[1] >= len(sequence):
+            if self.ion[0] == "y":
+                seq = sequence[::-1]
+                sv = shap_values[::-1]
+            else:
+                seq = sequence
+                sv = shap_values
+
+            ion_size = int(self.ion[1:].split("+")[0])
+            combo_pos = [-1 * combo[0] + ion_size - 1, -1 * combo[1] + ion_size - 1]
+
+            if combo_pos[0] >= len(sequence) or combo_pos[1] >= len(sequence):
                 continue
 
-            tok = f"{sequence[-combo[0]]}-{sequence[-combo[1]]}"
+            # AA-AA token
+            tok = f"{seq[combo_pos[0]]}-{seq[combo_pos[1]]}"
 
             # Initialize lists for new tokens
             if tok not in self.combo_pos_sv_sum[i]:
                 self.combo_pos_sv_sum[i][tok] = []
             if tok not in self.combo_pos_sv_abs_sum[i]:
                 self.combo_pos_sv_abs_sum[i][tok] = []
-            if tok not in self.combo_sv_sum[i]:
-                self.combo_sv_sum[i][tok] = []
+            if tok not in self.combo_inten[i]:
+                self.combo_inten[i][tok] = []
 
-            self.combo_pos_sv_sum[i][tok].append(
-                shap_values[-combo[0]] + shap_values[-combo[1]]
-            )
+            self.combo_pos_sv_sum[i][tok].append(sv[combo_pos[0]] + sv[combo_pos[1]])
             self.combo_pos_sv_abs_sum[i][tok].append(
-                abs(shap_values[-combo[0]]) + abs(shap_values[-combo[1]])
+                abs(sv[combo_pos[0]]) + abs(sv[combo_pos[1]])
             )
-            self.combo_sv_sum[i][tok].append(sum(shap_values))
+            self.combo_inten[i][tok].append(sum(sv))
 
     def clustering(self, config: dict):
         number_of_aas = config["clustering"]["number_of_aa"]
@@ -264,6 +254,7 @@ class ShapVisualization:
             visualization = ShapVisualization(
                 str(Path(config["sv_path"]).parent.absolute())
                 + f"/cluster_{cluster}/output.parquet.gzip",
+                self.ion,
                 [
                     [0, number_of_aas - 1],
                     [1, number_of_aas - 2],
@@ -321,34 +312,25 @@ class ShapVisualization:
 
     def position_only_plot(self, save=False):
         plt.close("all")
-        fig, axes = plt.subplots(4)
-        fig.set_figheight(15)
+        fig, axes = plt.subplots(2)
+        fig.set_figheight(5)
         fig.set_figwidth(15)
-        axes[0].set_title("mean(abs(sv)) from left end")
-        im = axes[0].imshow(
-            self.sv_abs_avg_from_left[None], cmap="RdBu_r", norm=TwoSlopeNorm(0)
-        )
-        axes[1].set_title("mean(sv) from left end")
-        im2 = axes[1].imshow(
-            self.sv_avg_from_left[None], cmap="RdBu_r", norm=TwoSlopeNorm(0)
-        )
-        axes[2].set_title("mean(abs(sv)) from right end")
-        im3 = axes[2].imshow(
-            self.sv_abs_avg_from_right[None], cmap="RdBu_r", norm=TwoSlopeNorm(0)
-        )
-        axes[3].set_title("mean(sv) from right end")
-        im4 = axes[3].imshow(
-            self.sv_avg_from_right[None], cmap="RdBu_r", norm=TwoSlopeNorm(0)
+        axes[0].set_title("mean(abs(sv))")
+        im = axes[0].imshow(self.sv_abs_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[1].set_title("mean(sv)")
+        im2 = axes[1].imshow(self.sv_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        tick_range = np.arange(
+            int(self.ion[1:].split("+")[0]) - 1,
+            -1 * (30 - int(self.ion[1:].split("+")[0]) + 1),
+            -1,
         )
         for ax in axes:
             ax.set_yticks([])
             ax.set_yticklabels([])
             ax.set_xticks(np.arange(30))
-            ax.set_xticklabels(np.arange(30), size=6)
+            ax.set_xticklabels(tick_range, size=6)
         fig.colorbar(im).ax.set_yscale("linear")
         fig.colorbar(im2).ax.set_yscale("linear")
-        fig.colorbar(im3).ax.set_yscale("linear")
-        fig.colorbar(im4).ax.set_yscale("linear")
         if save is not False:
             plt.savefig(save + "/position_only_plot.png", bbox_inches="tight")
         else:
@@ -356,71 +338,60 @@ class ShapVisualization:
 
     def position_heatmap(self, save=False):
         plt.close("all")
-        heatmap_int_le = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_le = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_abs_le = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_int_re = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_re = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_abs_re = np.zeros((len(self.amino_acids_sorted), 30))
+        heatmap_int = np.zeros((len(self.amino_acids_sorted), 30))
+        heatmap = np.zeros((len(self.amino_acids_sorted), 30))
+        heatmap_abs = np.zeros((len(self.amino_acids_sorted), 30))
 
         for A, a in enumerate(self.amino_acids_sorted):
             for b in np.arange(30):
-                tok = "%c-%d" % (a, b)
-                if tok in self.amino_acid_pos_sv_sum_from_left:
-                    heatmap_int_le[A, b] = self.amino_acid_pos_sv_sum_from_left[tok]
-                if tok in self.amino_acid_pos_abs_avg_from_left:
-                    heatmap_le[A, b] = self.amino_acid_pos_avg_from_left[tok]
-                    heatmap_abs_le[A, b] = self.amino_acid_pos_abs_avg_from_left[tok]
-                if tok in self.amino_acid_pos_sv_sum_from_right:
-                    heatmap_int_re[A, b] = self.amino_acid_pos_sv_sum_from_right[tok]
-                if tok in self.amino_acid_pos_abs_avg_from_right:
-                    heatmap_re[A, b] = self.amino_acid_pos_avg_from_right[tok]
-                    heatmap_abs_re[A, b] = self.amino_acid_pos_abs_avg_from_right[tok]
+                tok = "%c_%d" % (a, -1 * (b + 1 - int(self.ion[1:].split("+")[0])))
+                if tok in self.amino_acid_pos_inten:
+                    heatmap_int[A, b] = self.amino_acid_pos_inten[tok]
+                if tok in self.amino_acid_pos_abs_avg:
+                    heatmap[A, b] = self.amino_acid_pos_avg[tok]
+                    heatmap_abs[A, b] = self.amino_acid_pos_abs_avg[tok]
 
-            fig, axes = plt.subplots(3, 2)
-            fig.set_figheight(15)
-            fig.set_figwidth(15)
-            axes[0, 0].set_title("mean(intensity) from left end")
-            im = axes[0, 0].imshow(heatmap_int_le, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[1, 0].set_title("mean(abs(sv)) from left end")
-            im2 = axes[1, 0].imshow(heatmap_abs_le, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[2, 0].set_title("mean(sv) from left end")
-            im3 = axes[2, 0].imshow(heatmap_le, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[0, 1].set_title("mean(intensity) from right end")
-            im4 = axes[0, 1].imshow(heatmap_int_re, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[1, 1].set_title("mean(abs(sv)) from right end")
-            im5 = axes[1, 1].imshow(heatmap_abs_re, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[2, 1].set_title("mean(sv) from right end")
-            im6 = axes[2, 1].imshow(heatmap_re, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            for ax in axes.flatten():
-                ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
-                ax.set_yticklabels(self.amino_acids_sorted, size=6)
-                ax.set_xticks(np.arange(30))
-                ax.set_xticklabels(np.arange(30), size=6)
-            fig.colorbar(im).ax.set_yscale("linear")
-            fig.colorbar(im2).ax.set_yscale("linear")
-            fig.colorbar(im3).ax.set_yscale("linear")
-            fig.colorbar(im4).ax.set_yscale("linear")
-            fig.colorbar(im5).ax.set_yscale("linear")
-            fig.colorbar(im6).ax.set_yscale("linear")
-            if save is not False:
-                plt.savefig(save + "/position_heatmap.png", bbox_inches="tight")
-            else:
-                plt.show()
+        fig, axes = plt.subplots(3)
+        fig.set_figheight(15)
+        fig.set_figwidth(15)
+        axes[0].set_title("mean(intensity)")
+        im = axes[0].imshow(heatmap_int, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[1].set_title("mean(abs(sv))")
+        im2 = axes[1].imshow(heatmap_abs, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[2].set_title("mean(sv)")
+        im3 = axes[2].imshow(heatmap, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+
+        tick_range = np.arange(
+            int(self.ion[1:].split("+")[0]) - 1,
+            -1 * (30 - int(self.ion[1:].split("+")[0]) + 1),
+            -1,
+        )
+        for ax in axes:
+            ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
+            ax.set_yticklabels(self.amino_acids_sorted, size=6)
+            ax.set_xticks(np.arange(30))
+            ax.set_xticklabels(tick_range, size=6)
+        fig.colorbar(im).ax.set_yscale("linear")
+        fig.colorbar(im2).ax.set_yscale("linear")
+        fig.colorbar(im3).ax.set_yscale("linear")
+        if save is not False:
+            plt.savefig(save + "/position_heatmap.png", bbox_inches="tight")
+        else:
+            plt.show()
 
     def aa_heatmap(self, save=False):
         plt.close("all")
-        fig, axes = plt.subplots(3, 4)
+        fig, axes = plt.subplots(3, len(self.position_combos))
         fig.set_figheight(15)
         fig.set_figwidth(17)
 
         for ax in axes.flatten():
             ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_yticklabels(self.amino_acids_sorted, size=6)
-            ax.set_ylabel("AA(N)")
+            ax.set_ylabel("AA(L)")
             ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_xticklabels(self.amino_acids_sorted, size=6)
-            ax.set_xlabel("AA(C)")
+            ax.set_xlabel("AA(R)")
 
         for i, combo in enumerate(self.position_combos):
             heatmap = np.zeros(
@@ -432,27 +403,27 @@ class ShapVisualization:
             heatmap_int = np.zeros(
                 (len(self.amino_acids_sorted), len(self.amino_acids_sorted))
             )
-            for A, a in enumerate(self.amino_acids_sorted):
-                for B, b in enumerate(self.amino_acids_sorted):
-                    tok = "%c-%c" % (a, b)
+            for l, aa1 in enumerate(self.amino_acids_sorted):
+                for m, aa2 in enumerate(self.amino_acids_sorted):
+                    tok = "%c-%c" % (aa1, aa2)
                     if tok in self.combo_pos_sv_sum[i]:
                         if len(self.combo_pos_sv_sum[i][tok]) > MIN_OCCUR_HEAT:
-                            heatmap[A, B] = np.mean(self.combo_pos_sv_sum[i][tok])
-                            heatmap_abs[A, B] = np.mean(
+                            heatmap[l, m] = np.mean(self.combo_pos_sv_sum[i][tok])
+                            heatmap_abs[l, m] = np.mean(
                                 self.combo_pos_sv_abs_sum[i][tok]
                             )
-                            heatmap_int[A, B] = np.mean(self.combo_sv_sum[i][tok])
+                            heatmap_int[l, m] = np.mean(self.combo_inten[i][tok])
 
-            axes[0, i].set_title("%d-%d: mean(intensity)" % tuple(combo))
+            axes[0, i].set_title("%d_%d: mean(intensity)" % tuple(combo))
             im = axes[0, i].imshow(heatmap_int, cmap="RdBu_r", norm=TwoSlopeNorm(0))
-            axes[1, i].set_title("%d-%d: mean(sv)" % tuple(combo))
+            axes[1, i].set_title("%d_%d: mean(sv)" % tuple(combo))
             im2 = axes[1, i].imshow(heatmap, cmap="RdBu_r", norm=TwoSlopeNorm(0))
             axes[2, i].set_title("mean(abs(%d)+abs(%d))" % tuple(combo))
             im3 = axes[2, i].imshow(heatmap_abs, cmap="RdBu_r", norm=TwoSlopeNorm(0))
 
-            fig.colorbar(im, shrink=0.7).ax.set_yscale("linear")
-            fig.colorbar(im2, shrink=0.7).ax.set_yscale("linear")
-            fig.colorbar(im3, shrink=0.7).ax.set_yscale("linear")
+        fig.colorbar(im, shrink=0.7).ax.set_yscale("linear")
+        fig.colorbar(im2, shrink=0.7).ax.set_yscale("linear")
+        fig.colorbar(im3, shrink=0.7).ax.set_yscale("linear")
 
         if save is not False:
             plt.savefig(save + "/aa_heatmap.png", bbox_inches="tight")
@@ -460,67 +431,35 @@ class ShapVisualization:
             plt.show()
 
     def swarmplot(self, save=False):
-        # sorted_amino_acids_sv_keys = sorted(
-        #     self.amino_acids_sv,
-        #     key=lambda key: len(self.amino_acids_sv[key]),
-        #     reverse=True,
-        # )
-
-        fig, axs = plt.subplots(ncols=2)
+        fig, ax = plt.subplots()
         fig.set_figwidth(15)
         fig.set_figheight(8)
 
-        data_right = {"shap_value": [], "amino_acid": [], "position": []}
-        for key, values in self.amino_acid_pos_from_right.items():
-            data_right["shap_value"].extend(values)
-            data_right["amino_acid"].extend([key[0]] * len(values))
-            data_right["position"].extend([int(key[2:])] * len(values))
+        data = {"shap_value": [], "amino_acid": [], "inside_ion": []}
+        for key, values in self.amino_acid_pos.items():
+            inside = True if int(key[2:]) >= 0 else False
+            data["shap_value"].extend(values)
+            data["amino_acid"].extend([key[0]] * len(values))
+            data["inside_ion"].extend([inside] * len(values))
 
-        plot_right = sns.stripplot(
-            data=data_right,
+        plot = sns.stripplot(
+            data=data,
             order=self.amino_acids_sorted,
             x="shap_value",
             y="amino_acid",
-            size=3,
+            size=2,
             jitter=0.4,
-            hue="position",
-            palette="RdBu_r",
-            legend=False,
-            ax=axs[0],
+            hue="inside_ion",
+            legend=True,
+            ax=ax,
         )
 
-        cmap_right = plt.get_cmap("RdBu_r")
-        norm_right = plt.Normalize(0, max(data_right["position"]))
-        sm_right = matplotlib.cm.ScalarMappable(norm=norm_right, cmap=cmap_right)
-        sm_right.set_array([])
-        cbar_right = fig.colorbar(sm_right, ax=plot_right, shrink=0.7)
-        cbar_right.set_label("Position from right")
-
-        data_left = {"shap_value": [], "amino_acid": [], "position": []}
-        for key, values in self.amino_acid_pos_from_left.items():
-            data_left["shap_value"].extend(values)
-            data_left["amino_acid"].extend([key[0]] * len(values))
-            data_left["position"].extend([int(key[2:])] * len(values))
-
-        plot_left = sns.stripplot(
-            data=data_left,
-            order=self.amino_acids_sorted,
-            x="shap_value",
-            y="amino_acid",
-            size=3,
-            jitter=0.4,
-            hue="position",
-            palette="RdBu_r",
-            legend=False,
-            ax=axs[1],
-        )
-
-        cmap_left = plt.get_cmap("RdBu_r")
-        norm_left = plt.Normalize(0, max(data_left["position"]))
-        sm_left = matplotlib.cm.ScalarMappable(norm=norm_left, cmap=cmap_left)
-        sm_left.set_array([])
-        cbar_left = fig.colorbar(sm_left, ax=plot_left, shrink=0.7)
-        cbar_left.set_label("Position from left")
+        # cmap = plt.get_cmap("RdBu_r")
+        # norm = plt.Normalize(min(data["position"]), max(data["position"]))
+        # sm = matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap)
+        # sm.set_array([])
+        # cbar = fig.colorbar(sm, ax=plot, shrink=0.7)
+        # cbar.set_label("Position")
 
         if save is not False:
             plt.savefig(save + "/swarmplot.png", bbox_inches="tight")
@@ -537,7 +476,11 @@ class ShapVisualization:
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
-        config = yaml.safe_load(file)["shap_visualization"]
-    visualization = ShapVisualization(config["sv_path"])
-    visualization.full_report(save=str(Path(config["sv_path"]).parent.absolute()))
-    visualization.clustering(config)
+        config = yaml.safe_load(file)
+    visualization = ShapVisualization(
+        config["shap_visualization"]["sv_path"], ion=config["shap_calculator"]["ion"]
+    )
+    visualization.full_report(
+        save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
+    )
+    visualization.clustering(config["shap_visualization"])

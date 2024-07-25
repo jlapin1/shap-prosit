@@ -29,6 +29,8 @@ if __name__ == "__main__":
         bgd_sz=config_calculator["bgd_sz"],
     )
 
-    visualization = ShapVisualization(config_calculator["ion"] + "/output.parquet.gzip")
+    visualization = ShapVisualization(
+        config_calculator["ion"] + "/output.parquet.gzip", config_calculator["ion"]
+    )
     visualization.full_report(save=config_calculator["ion"])
     visualization.clustering(config["shap_visualization"])

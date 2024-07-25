@@ -1,1 +1,1 @@
-Length of the cluster: 1133, Cluster mean intensity: 0.00842372762565356
+Length of the cluster: 1131, Cluster mean intensity: 0.008434033490125092
