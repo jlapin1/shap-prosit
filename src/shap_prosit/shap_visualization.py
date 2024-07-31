@@ -56,6 +56,7 @@ class ShapVisualization:
 
         self.amino_acid_pos_from_break = {}
         self.amino_acid_pos_sv_sum_from_from_break = {}
+        self.corresponding_sequence = {}
 
         for sequence, shap_values in zip(self.seq_list, self.shap_values_list):
             seq = np.array(sequence)
@@ -104,9 +105,12 @@ class ShapVisualization:
                     self.amino_acid_pos_from_break[tok_c] = []
                 if tok_c not in self.amino_acid_pos_sv_sum_from_from_break:
                     self.amino_acid_pos_sv_sum_from_from_break[tok_c] = []
+                if tok_c not in self.corresponding_sequence:
+                    self.corresponding_sequence[tok_c] = []
                 # Store values for token in list
                 self.amino_acid_pos_from_break[tok_c].append(sh_value)
                 self.amino_acid_pos_sv_sum_from_from_break[tok_c].append(sum(sv))
+                self.corresponding_sequence[tok_c].append(sequence)
 
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
 
