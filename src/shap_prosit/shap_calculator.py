@@ -37,11 +37,10 @@ class ShapCalculator:
 
         self.bgd_sz = bgd.shape[0]
 
-        # TODO unsafe method, change for regex
-        self.ext = int(ion[1])
+        self.ext = int(ion[1:].split("+")[0])
 
         self.fnull = np.array(
-            [self.model_wrapper.make_prediction(self.hx(bgd)).squeeze().mean()]
+            [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
         )
 
         self.savepep = []
@@ -91,22 +90,7 @@ class ShapCalculator:
         # self.savecv.append(zs)
         return out
 
-    @tf.function
-    def hx(self, tokens):
-        sequence = tokens[:, :-2]
-        collision_energy = tf.strings.to_number(tokens[:, -2:-1])
-        precursor_charge = tf.one_hot(
-            tf.cast(tf.strings.to_number(tokens[:, -1]), tf.int32) - 1, self.max_charge
-        )
-        z = {
-            "sequence": sequence,
-            "collision_energy": collision_energy,
-            "precursor_charge": precursor_charge,
-        }
-
-        return z
-
-    def ens_pred(self, pep, batsz=100, mask=True):
+    def ens_pred(self, pep, batsz=1000, mask=True):
         # pep: coalition vectors, 1s and 0s; excludes absent AAs
         P = pep.shape
 
@@ -141,10 +125,10 @@ class ShapCalculator:
             bgd_inds = bgd_indices[I * batsz : (I + 1) * batsz][: tf.shape(batch)[0]]
 
             # Create 1/0 mask and then turn into model ready input
-            inp = self.hx(self.mask_pep(batch, self.inp_orig, bgd_inds, mask))
+            inp = self.mask_pep(batch, self.inp_orig, bgd_inds, mask)
 
             # Run through model
-            out = self.model_wrapper.make_prediction(inp)
+            out = self.model_wrapper.make_prediction(inp.numpy())
             out_.append(out)
 
         out_ = tf.concat(out_, axis=0)
@@ -231,7 +215,7 @@ def save_shap_values(
 
     sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
 
-    bgd_pred = model_wrapper.make_prediction(sc.hx(bgd))
+    bgd_pred = model_wrapper.make_prediction(bgd)
     bgd_mean = np.mean(bgd_pred)
 
     result = {
