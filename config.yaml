@@ -2,12 +2,12 @@ shap_calculator:
   val_inps_path: val_inps.csv
   model_path: Prosit_2019_intensity
   model_type: koina
-  ion: y5+1
+  ion: y2+1
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: data/y5+1 Prosit2019/output.parquet.gzip
+  sv_path: data/y2+1/output.parquet.gzip
   clustering:
-    from_which_end: right
-    number_of_aa: 6
+    from_which_end: left
+    number_of_aa: 5
