@@ -12,13 +12,11 @@ from numpy import ndarray
 
 from . import TransformerModel
 
-
-@tf.function
-def hx(self, tokens):
+def hx(tokens):
     sequence = tokens[:, :-2]
     collision_energy = tf.strings.to_number(tokens[:, -2:-1])
     precursor_charge = tf.one_hot(
-        tf.cast(tf.strings.to_number(tokens[:, -1]), tf.int32) - 1, self.max_charge
+        tf.cast(tf.strings.to_number(tokens[:, -1]), tf.int32) - 1, 6
     )
     z = {
         "sequence": sequence,
@@ -110,7 +108,7 @@ class KoinaWrapper(ModelWrapper):
                     results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
         else:
             results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
-        return results
+        return np.array(results)
 
 
 model_wrappers = {
