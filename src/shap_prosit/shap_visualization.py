@@ -516,8 +516,9 @@ class ShapVisualization:
 
     def boxplot_token(self, save="."):
         plt.close("all")
-        fig = plt.gcf()
+        fig, (ax1, ax2) = plt.subplots(2, 1)
         fig.set_figwidth(15)
+        fig.set_figheight(10)
 
         sum_abs_sv = {}
 
@@ -538,12 +539,44 @@ class ShapVisualization:
                 data["Amino acids on positions 0:-1"].append(aa)
 
         df = pd.DataFrame(data)
-        figure = sns.boxplot(
+        sns.boxplot(
+            ax=ax1,
             data=df,
             x="Amino acids on positions 0:-1",
             y="SHAP values",
             color="#1f77b4",
         ).set_title("mean(abs(sv))")
+
+        sum_abs_sv_without_p = {}
+
+        for key in self.combo_pos_sv_sum[0].keys():
+            if len(self.combo_pos_sv_sum[0][key]) < MIN_OCCUR_HEAT or "P" in key:
+                continue
+            sum_abs_sv_without_p[key] = mean(
+                [abs(x) for x in self.combo_pos_sv_sum[0][key]]
+            )
+
+        data = {"SHAP values": [], "Amino acids on positions 0:-1": []}
+
+        for aa in list(
+            dict(
+                sorted(sum_abs_sv_without_p.items(), key=lambda x: x[1], reverse=True)[
+                    :20
+                ]
+            ).keys()
+        ):
+            for shap in self.combo_pos_sv_sum[0][aa]:
+                data["SHAP values"].append(abs(shap))
+                data["Amino acids on positions 0:-1"].append(aa)
+
+        df = pd.DataFrame(data)
+        sns.boxplot(
+            ax=ax2,
+            data=df,
+            x="Amino acids on positions 0:-1",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("mean(abs(sv)) without Proline")
 
         if save is not False:
             plt.savefig(save + "/boxplot_token.png", bbox_inches="tight")
