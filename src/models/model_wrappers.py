@@ -71,7 +71,9 @@ class PrositIntensityWrapper(ModelWrapper):
 class TransformerIntensityWrapper(ModelWrapper):
     def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
         self.ion_ind = annotations()[ion]
-        self.model = PrositIntensityPredictor(seq_length=30)
+        with open(os.path.join(path, "model.yaml"), encoding="utf-8") as file:
+            model_config = yaml.safe_load(file)
+        self.model = TransformerModel(**model_config)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
 
