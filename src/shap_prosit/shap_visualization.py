@@ -8,6 +8,8 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from statistics import mean
+
 import yaml
 from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
@@ -437,6 +439,7 @@ class ShapVisualization:
             plt.show()
 
     def swarmplot(self, save=False):
+        plt.close("all")
         fig, ax = plt.subplots()
         fig.set_figwidth(15)
         fig.set_figheight(8)
@@ -469,7 +472,114 @@ class ShapVisualization:
         # cbar.set_label("Position")
 
         if save is not False:
-            plt.savefig(save + "/swarmplot.png", bbox_inches="tight")
+            plt.savefig(save + "/swarmplot.png")
+        else:
+            plt.show()
+
+    def boxplot_position(self, save="."):
+        plt.close("all")
+        fig = plt.gcf()
+        fig.set_figwidth(15)
+
+        sum_abs_sv = {}
+
+        for key in self.amino_acid_pos.keys():
+            if key.startswith(("R", "H", "K")):
+                continue
+            if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
+                continue
+            sum_abs_sv[key] = mean([abs(x) for x in self.amino_acid_pos[key]])
+
+        data = {"SHAP values": [], "Amino acid - Position": []}
+
+        for aa in list(
+            dict(
+                sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
+            ).keys()
+        ):
+            for shap in self.amino_acid_pos[aa]:
+                data["SHAP values"].append(abs(shap))
+                data["Amino acid - Position"].append(aa)
+
+        df = pd.DataFrame(data)
+        figure = sns.boxplot(
+            data=df,
+            x="Amino acid - Position",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("mean(abs(sv))")
+
+        if save is not False:
+            plt.savefig(save + "/boxplot_position.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+    def boxplot_token(self, save="."):
+        plt.close("all")
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+        fig.set_figwidth(15)
+        fig.set_figheight(10)
+
+        sum_abs_sv = {}
+
+        for key in self.combo_pos_sv_sum[0].keys():
+            if len(self.combo_pos_sv_sum[0][key]) < MIN_OCCUR_HEAT:
+                continue
+            sum_abs_sv[key] = mean([abs(x) for x in self.combo_pos_sv_sum[0][key]])
+
+        data = {"SHAP values": [], "Amino acids on positions 0:-1": []}
+
+        for aa in list(
+            dict(
+                sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
+            ).keys()
+        ):
+            for shap in self.combo_pos_sv_sum[0][aa]:
+                data["SHAP values"].append(abs(shap))
+                data["Amino acids on positions 0:-1"].append(aa)
+
+        df = pd.DataFrame(data)
+        sns.boxplot(
+            ax=ax1,
+            data=df,
+            x="Amino acids on positions 0:-1",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("mean(abs(sv))")
+
+        sum_abs_sv_without_p = {}
+
+        for key in self.combo_pos_sv_sum[0].keys():
+            if len(self.combo_pos_sv_sum[0][key]) < MIN_OCCUR_HEAT or "P" in key:
+                continue
+            sum_abs_sv_without_p[key] = mean(
+                [abs(x) for x in self.combo_pos_sv_sum[0][key]]
+            )
+
+        data = {"SHAP values": [], "Amino acids on positions 0:-1": []}
+
+        for aa in list(
+            dict(
+                sorted(sum_abs_sv_without_p.items(), key=lambda x: x[1], reverse=True)[
+                    :20
+                ]
+            ).keys()
+        ):
+            for shap in self.combo_pos_sv_sum[0][aa]:
+                data["SHAP values"].append(abs(shap))
+                data["Amino acids on positions 0:-1"].append(aa)
+
+        df = pd.DataFrame(data)
+        sns.boxplot(
+            ax=ax2,
+            data=df,
+            x="Amino acids on positions 0:-1",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("mean(abs(sv)) without Proline")
+
+        if save is not False:
+            plt.savefig(save + "/boxplot_token.png", bbox_inches="tight")
         else:
             plt.show()
 
@@ -479,6 +589,8 @@ class ShapVisualization:
         self.position_heatmap(save=save)
         self.aa_heatmap(save=save)
         self.swarmplot(save=save)
+        self.boxplot_position(save=save)
+        self.boxplot_token(save=save)
 
 
 if __name__ == "__main__":

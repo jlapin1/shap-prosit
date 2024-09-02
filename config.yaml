@@ -9,5 +9,5 @@ shap_calculator:
 shap_visualization:
   sv_path: y7+1/output.parquet.gzip
   clustering:
-    from_which_end: right
-    number_of_aa: 10
+    from_which_end: left
+    number_of_aa: 4
