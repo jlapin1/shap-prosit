@@ -2,12 +2,12 @@ shap_calculator:
   val_inps_path: val_inps.csv
   model_path: saved_model/save_small
   model_type: transformer
-  ion: b3+1
+  ion: y5+1
   perm_path: data/y5+1 Prosit2019/perm.txt # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: data/b3+1/output.parquet.gzip
+  sv_path: p_low/result.parquet.gzip
   clustering:
-    from_which_end: left
-    number_of_aa: 4
+    from_which_end: right
+    number_of_aa: 6

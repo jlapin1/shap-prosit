@@ -478,36 +478,70 @@ class ShapVisualization:
 
     def boxplot_position(self, save="."):
         plt.close("all")
-        fig = plt.gcf()
+        fig, (ax1, ax2) = plt.subplots(2, 1)
         fig.set_figwidth(15)
+        fig.set_figheight(10)
 
         sum_abs_sv = {}
 
         for key in self.amino_acid_pos.keys():
-            if key.startswith(("R", "H", "K")):
-                continue
             if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
                 continue
             sum_abs_sv[key] = mean([abs(x) for x in self.amino_acid_pos[key]])
 
         data = {"SHAP values": [], "Amino acid - Position": []}
 
-        for aa in list(
-            dict(
-                sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
-            ).keys()
-        ):
-            for shap in self.amino_acid_pos[aa]:
-                data["SHAP values"].append(abs(shap))
-                data["Amino acid - Position"].append(aa)
+        if sum_abs_sv:
+            for aa in list(
+                dict(
+                    sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
+                ).keys()
+            ):
+                for shap in self.amino_acid_pos[aa]:
+                    data["SHAP values"].append(shap)
+                    data["Amino acid - Position"].append(aa)
 
-        df = pd.DataFrame(data)
-        figure = sns.boxplot(
-            data=df,
-            x="Amino acid - Position",
-            y="SHAP values",
-            color="#1f77b4",
-        ).set_title("mean(abs(sv))")
+            df = pd.DataFrame(data)
+            sns.boxplot(
+                ax=ax1,
+                data=df,
+                x="Amino acid - Position",
+                y="SHAP values",
+                color="#1f77b4",
+            ).set_title("mean(sv)")
+
+        sum_abs_sv_without_rhk = {}
+
+        for key in self.amino_acid_pos.keys():
+            if key.startswith(("R", "H", "K")):
+                continue
+            if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
+                continue
+            sum_abs_sv_without_rhk[key] = mean(
+                [abs(x) for x in self.amino_acid_pos[key]]
+            )
+
+        data = {"SHAP values": [], "Amino acid - Position": []}
+
+        if sum_abs_sv_without_rhk:
+            for aa in list(
+                dict(
+                    sorted(
+                        sum_abs_sv_without_rhk.items(), key=lambda x: x[1], reverse=True
+                    )[:20]
+                ).keys()
+            ):
+                for shap in self.amino_acid_pos[aa]:
+                    data["SHAP values"].append(shap)
+                    data["Amino acid - Position"].append(aa)
+
+            df = pd.DataFrame(data)
+            sns.boxplot(
+                data=df,
+                x="Amino acid - Position",
+                y="SHAP values",
+                color="#1f77b4",
+            ).set_title("mean(sv) without R,H,K")
 
         if save is not False:
             plt.savefig(save + "/boxplot_position.png", bbox_inches="tight")
@@ -529,23 +563,24 @@ class ShapVisualization:
 
         data = {"SHAP values": [], "Amino acids on positions 0:-1": []}
 
-        for aa in list(
-            dict(
-                sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
-            ).keys()
-        ):
-            for shap in self.combo_pos_sv_sum[0][aa]:
-                data["SHAP values"].append(abs(shap))
-                data["Amino acids on positions 0:-1"].append(aa)
+        if sum_abs_sv:
+            for aa in list(
+                dict(
+                    sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
+                ).keys()
+            ):
+                for shap in self.combo_pos_sv_sum[0][aa]:
+                    data["SHAP values"].append(shap)
+                    data["Amino acids on positions 0:-1"].append(aa)
 
-        df = pd.DataFrame(data)
-        sns.boxplot(
-            ax=ax1,
-            data=df,
-            x="Amino acids on positions 0:-1",
-            y="SHAP values",
-            color="#1f77b4",
-        ).set_title("mean(abs(sv))")
+            df = pd.DataFrame(data)
+            sns.boxplot(
+                ax=ax1,
+                data=df,
+                x="Amino acids on positions 0:-1",
+                y="SHAP values",
+                color="#1f77b4",
+            ).set_title("mean(sv)")
 
         sum_abs_sv_without_p = {}
 
@@ -558,28 +593,29 @@ class ShapVisualization:
 
         data = {"SHAP values": [], "Amino acids on positions 0:-1": []}
 
-        for aa in list(
-            dict(
-                sorted(sum_abs_sv_without_p.items(), key=lambda x: x[1], reverse=True)[
-                    :20
-                ]
-            ).keys()
-        ):
-            for shap in self.combo_pos_sv_sum[0][aa]:
-                data["SHAP values"].append(abs(shap))
-                data["Amino acids on positions 0:-1"].append(aa)
+        if sum_abs_sv_without_p:
+            for aa in list(
+                dict(
+                    sorted(
+                        sum_abs_sv_without_p.items(), key=lambda x: x[1], reverse=True
+                    )[:20]
+                ).keys()
+            ):
+                for shap in self.combo_pos_sv_sum[0][aa]:
+                    data["SHAP values"].append(shap)
+                    data["Amino acids on positions 0:-1"].append(aa)
 
-        df = pd.DataFrame(data)
-        sns.boxplot(
-            ax=ax2,
-            data=df,
-            x="Amino acids on positions 0:-1",
-            y="SHAP values",
-            color="#1f77b4",
-        ).set_title("mean(abs(sv)) without Proline")
+            df = pd.DataFrame(data)
+            sns.boxplot(
+                ax=ax2,
+                data=df,
+                x="Amino acids on positions 0:-1",
+                y="SHAP values",
+                color="#1f77b4",
+            ).set_title("mean(sv) without Proline")
 
         if save is not False:
-            plt.savefig(save + "/boxplot_token.png", bbox_inches="tight")
+            plt.savefig(save + "/boxplot_bi_token.png", bbox_inches="tight")
         else:
             plt.show()
 
