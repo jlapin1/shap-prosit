@@ -87,30 +87,50 @@ class KoinaWrapper(ModelWrapper):
         self.ion = ion
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
-        sequences = []
-        for i in inputs[:, :-2]:
-            try:
-                seq = "".join(i)
-            except:
-                seq = b"".join(i).decode("utf-8")
-            sequences.append(seq)
-        input_dict = {
-            "peptide_sequences": np.array(sequences),
-            "precursor_charges": inputs[:, -2].astype("float"),
-            "collision_energies": inputs[:, -1].astype("float"),
-        }
-        preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
-        if len(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]) < len(sequences):
-            print(sequences[0])
-            results = []
-            for i in range(len(sequences)):
-                if i not in preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].index:
-                    results.append(0.0)
-                else:
-                    results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
+        # set ion = "rt" to enter retention time mode
+        # inputs["sequences"] = [["W", "E"],[],[]]
+        if self.ion == "rt":
+
+            print(type(hx(inputs)["sequence"][0]))
+
+            sequences = []
+            for seq in hx(inputs)["sequence"]:
+                try:
+                    sequence = "".join(seq)
+                except:
+                    sequence = b"".join(seq).decode("utf-8")
+                sequences.append(sequence)
+
+            input_df = pd.DataFrame()
+            input_df['peptide_sequences'] = np.array(sequences)
+
+            return (self.model.predict(input_df)["irt"]).to_numpy()
         else:
-            results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
-        return np.array(results)
+            # stuff for intensity model
+            sequences = []
+            for i in inputs[:, :-2]:
+                try:
+                    seq = "".join(i)
+                except:
+                    seq = b"".join(i).decode("utf-8")
+                sequences.append(seq)
+            input_dict = {
+                "peptide_sequences": np.array(sequences),
+                "precursor_charges": inputs[:, -2].astype("float"),
+                "collision_energies": inputs[:, -1].astype("float"),
+            }
+            preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
+            if len(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]) < len(sequences):
+                print(sequences[0])
+                results = []
+                for i in range(len(sequences)):
+                    if i not in preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].index:
+                        results.append(0.0)
+                    else:
+                        results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
+            else:
+                results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
+            return np.array(results)
 
 
 model_wrappers = {
