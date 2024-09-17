@@ -105,6 +105,23 @@ class KoinaWrapper(ModelWrapper):
             input_df['peptide_sequences'] = np.array(sequences)
 
             return (self.model.predict(input_df)["irt"]).to_numpy()
+
+        elif self.ion == "cc":
+            # set ion = "cc" to enter retention time mode
+            sequences = []
+            for seq in hx(inputs)["sequence"]:
+                try:
+                    sequence = "".join(seq)
+                except:
+                    sequence = b"".join(seq).decode("utf-8")
+                sequences.append(sequence)
+
+            input_df = pd.DataFrame()
+            input_df['peptide_sequences'] = np.array(sequences)
+            input_df['precursor_charges'] = inputs[:, -2].astype("float")
+
+            return (self.model.predict(input_df)["ccs"]).to_numpy()
+
         else:
             # stuff for intensity model
             sequences = []

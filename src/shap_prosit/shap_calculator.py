@@ -37,7 +37,7 @@ class ShapCalculator:
 
         self.bgd_sz = bgd.shape[0]
 
-        if ion == "rt":
+        if ion in {"rt", "cc"}:
             self.ext = 0
         else:
             self.ext = int(ion[1:].split("+")[0])
