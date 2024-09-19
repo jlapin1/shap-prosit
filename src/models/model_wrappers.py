@@ -12,6 +12,7 @@ from numpy import ndarray
 
 from . import TransformerModel
 
+
 def hx(tokens):
     sequence = tokens[:, :-2]
     collision_energy = tf.strings.to_number(tokens[:, -2:-1])
@@ -96,20 +97,33 @@ class KoinaWrapper(ModelWrapper):
             sequences.append(seq)
         input_dict = {
             "peptide_sequences": np.array(sequences),
-            "precursor_charges": inputs[:, -2].astype("float"),
-            "collision_energies": inputs[:, -1].astype("float"),
+            "precursor_charges": inputs[:, -1].astype("int"),
+            "collision_energies": (inputs[:, -2].astype("float") * 100).astype("int"),
         }
         preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
-        if len(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]) < len(sequences):
+        if len(
+            preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]
+        ) < len(sequences):
             print(sequences[0])
             results = []
             for i in range(len(sequences)):
-                if i not in preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].index:
+                if (
+                    i
+                    not in preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                        "intensities"
+                    ].index
+                ):
                     results.append(0.0)
                 else:
-                    results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
+                    results.append(
+                        preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                            "intensities"
+                        ][i]
+                    )
         else:
-            results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
+            results = preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                "intensities"
+            ].to_numpy()
         return np.array(results)
 
 
