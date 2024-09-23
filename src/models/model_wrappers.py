@@ -118,8 +118,10 @@ class KoinaWrapper(ModelWrapper):
 
             input_df = pd.DataFrame()
             input_df['peptide_sequences'] = np.array(sequences)
-            input_df['precursor_charges'] = inputs[:, -2].astype("float")
-
+            input_df['precursor_charges'] = inputs[:, -1].astype("int")
+            print(input_df['peptide_sequences'])
+            print(input_df['precursor_charges'])
+            assert len(input_df.shape)==2, f"shape is not 2-dimensional\n{input_df}"
             return (self.model.predict(input_df)["ccs"]).to_numpy()
 
         else:

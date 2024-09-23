@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from statistics import mean
+from collections import defaultdict
 
 import yaml
 from matplotlib import pyplot as plt
@@ -21,7 +22,7 @@ MIN_OCCUR_AVG = 100
 MIN_OCCUR_HEAT = 15
 
 
-class ShapVisualization:
+class ShapVisualizationIntensity:
     def __init__(
         self,
         sv_path: Union[str, bytes, os.PathLike],
@@ -253,7 +254,7 @@ class ShapVisualization:
 
         # Create plots for output.txt in clusters
         for cluster in np.asarray((unique)):
-            visualization = ShapVisualization(
+            visualization = ShapVisualizationIntensity(
                 str(Path(config["sv_path"]).parent.absolute())
                 + f"/cluster_{cluster}/output.parquet.gzip",
                 self.ion,
@@ -592,14 +593,303 @@ class ShapVisualization:
         self.boxplot_position(save=save)
         self.boxplot_token(save=save)
 
+class ShapVisualizationGeneral():
+    def __init__(
+        self,
+        sv_path: Union[str, bytes, os.PathLike],
+        ion: str,
+    ) -> None:
+
+        self.ion = ion
+        df = pd.read_parquet(sv_path)
+        self.charge = df["charge"].tolist()
+        self.seq_list = df["sequence"].tolist()
+        self.shap_values_list = df["shap_values"].tolist()
+
+        # Initialize data structures
+        self.count_positions = np.zeros((30))
+        self.sv_sum = np.zeros((30))
+        self.sv_abs_sum = np.zeros((30))
+        self.combo_pos_sv_sum = []
+        self.combo_pos_sv_abs_sum = []
+        self.amino_acids_sv = {}
+        self.amino_acid_pos = {}
+        self.amino_acid_pos_generic = {}
+
+        for sequence, shap_values in zip(self.seq_list, self.shap_values_list):
+            # single peptide sequence
+            seq = np.array(sequence)
+            # shap values per amino acid in that peptide sequence
+            sv = np.array(shap_values)
+
+            # length of single peptide sequence
+            le = len(seq)
+            # increment position count for is aa~
+            self.count_positions += np.append(np.ones((le)), np.zeros((30 - le)))
+
+            # Gather sum and abs sum of SV in each position
+            self.sv_sum[:le] += sv
+            self.sv_abs_sum[:le] += abs(sv)
+
+            for i, (am_ac, sh_value) in enumerate(zip(seq, sv)):
+                # Store SHAP value for each AA
+                if am_ac not in self.amino_acids_sv:
+                    self.amino_acids_sv[am_ac] = []
+                self.amino_acids_sv[am_ac].append(sh_value)
+
+                # Create token (~id for aa-position plots) for AA and position
+                # 0 is the first index in ion, positives are inside ion
+                # negatives are outside of ion
+                tok_c = (
+                    f"{am_ac}_{i}"
+                )
+
+                # Check if token already in dictionary
+                if tok_c not in self.amino_acid_pos:
+                    self.amino_acid_pos[tok_c] = []
+                if tok_c not in self.amino_acid_pos_generic:
+                    self.amino_acid_pos_generic[tok_c] = []
+
+                # Store values for token in list
+                self.amino_acid_pos[tok_c].append(sh_value)
+                self.amino_acid_pos_generic[tok_c].append(sum(sv))
+
+        self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
+
+        self.sv_avg = self.sv_sum / (self.count_positions + 1e-9)
+        self.sv_avg *= self.count_positions > MIN_OCCUR_AVG
+        self.sv_abs_avg = self.sv_abs_sum / (self.count_positions + 1e-9)
+        self.sv_abs_avg *= self.count_positions > MIN_OCCUR_AVG
+
+        self.amino_acids_abs_avg_sv = {
+            a: np.mean(np.abs(self.amino_acids_sv[a])) for a in self.amino_acids_sorted
+        }
+        self.amino_acids_avg_sv = {
+            a: np.mean(self.amino_acids_sv[a]) for a in self.amino_acids_sorted
+        }
+        self.amino_acids_std_sv = {
+            a: np.std(self.amino_acids_sv[a]) for a in self.amino_acids_sorted
+        }
+
+        # AA-position heatmaps
+        # Consolidate lists of values into single values for each token
+        self.amino_acid_pos_generic = {
+            tok: np.mean(self.amino_acid_pos_generic[tok])
+            for tok in self.amino_acid_pos_generic.keys()
+            if len(self.amino_acid_pos_generic[tok]) > MIN_OCCUR_HEAT
+        }
+        self.amino_acid_pos_avg = {
+            tok: np.mean(self.amino_acid_pos[tok])
+            for tok in self.amino_acid_pos.keys()
+            if len(self.amino_acid_pos) > MIN_OCCUR_HEAT
+        }
+        self.amino_acid_pos_abs_avg = {
+            tok: np.mean(np.abs(self.amino_acid_pos[tok]))
+            for tok in self.amino_acid_pos.keys()
+            if len(self.amino_acid_pos) > MIN_OCCUR_HEAT
+        }
+
+    def aa_only_plot(self, save=False):
+        plt.close("all")
+        fig, axes = plt.subplots(4, 1)
+        fig.set_figheight(10)
+        fig.set_figwidth(15)
+
+        axes[0].set_title("Mean of absolute SHAP values per amino acid")
+        axes[0].set_xlim([-0.5, 19.5])
+        axes[0].plot(list(self.amino_acids_abs_avg_sv.values()), "ro")
+        im = axes[1].imshow(
+            np.array(list(self.amino_acids_abs_avg_sv.values()))[None],
+            cmap="RdBu_r",
+            norm=TwoSlopeNorm(0),
+        )
+        axes[2].set_title("Mean of SHAP values per amino acid")
+        axes[2].errorbar(
+            np.arange(len(self.amino_acids_sorted)),
+            np.array(list(self.amino_acids_avg_sv.values())),
+            np.array(list(self.amino_acids_std_sv.values())),
+            marker="o",
+            linestyle="none",
+            markerfacecolor="red",
+            markersize=10,
+        )
+        im2 = axes[3].imshow(
+            np.array(list(self.amino_acids_avg_sv.values()))[None],
+            cmap="RdBu_r",
+            norm=TwoSlopeNorm(0),
+        )
+        axes[3].set_xlim([-0.5, 19.5])
+        for ax in axes:
+            ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
+            ax.set_xticklabels(self.amino_acids_sorted, size=8)
+        for ax in axes[[1, 3]]:
+            ax.set_yticks([])
+            ax.set_yticklabels([])
+        fig.colorbar(im, ax=axes[:2]).ax.set_yscale("linear")
+        fig.colorbar(im2, ax=axes[2:]).ax.set_yscale("linear")
+        if save is not False:
+            plt.savefig(save + "/aa_only_plot.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+    def position_only_plot(self, save=False):
+        plt.close("all")
+        fig, axes = plt.subplots(2)
+        fig.set_figheight(5)
+        fig.set_figwidth(15)
+        axes[0].set_title("Mean of absolute SHAP values per position")
+        im = axes[0].imshow(self.sv_abs_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[1].set_title("Mean of SHAP values per position")
+        im2 = axes[1].imshow(self.sv_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        for ax in axes:
+            ax.set_yticks([])
+            ax.set_yticklabels([])
+            ax.set_xticks(np.arange(30))
+            ax.set_xticklabels(np.arange(30), size=6)
+        fig.colorbar(im).ax.set_yscale("linear")
+        fig.colorbar(im2).ax.set_yscale("linear")
+        if save is not False:
+            plt.savefig(save + "/position_only_plot.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+    def position_length_plot(self, save=False, absolute=False):
+        plt.close("all")
+
+        position_length_dict = defaultdict(list)
+        for peptide_sequence in self.shap_values_list:
+            position_length_dict[len(peptide_sequence)].append(peptide_sequence)
+
+        for key in position_length_dict.keys():
+            if absolute:
+                position_length_dict[key] = np.mean(np.abs(np.array(position_length_dict[key])), axis=0)
+            else:
+                position_length_dict[key] = np.mean(np.array(position_length_dict[key]), axis=0)
+            position_length_dict[key] = np.pad(position_length_dict[key], (0, 30 - key))
+            #np.concatenate(position_length_dict[key], np.array([None] * (30 - key)))
+
+        df = pd.DataFrame(position_length_dict)
+        df = df.reindex(sorted(df.columns), axis=1)
+        df.index += 1
+        df = df.transpose()
+        plt.figure(figsize=(24, 16))
+        mask = df.isnull()
+        if absolute:
+            cmap = sns.color_palette('Blues', as_cmap=True)
+        else:
+            cmap = sns.color_palette('RdBu_r', as_cmap=True)
+        cmap.set_bad(color="lightgray")
+        ax = sns.heatmap(df, annot=True, cmap=cmap, mask=mask, linewidths=0.5, linecolor='gray', edgecolor='gray')
+        #ax.invert_yaxis()
+
+        if save is not False:
+            plt.savefig(f"{save}/position_length_plot_abs={absolute}.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+
+
+
+    def position_heatmap(self, save=False):
+        plt.close("all")
+        heatmap_generic = np.zeros((len(self.amino_acids_sorted), 30))
+        heatmap = np.zeros((len(self.amino_acids_sorted), 30))
+        heatmap_abs = np.zeros((len(self.amino_acids_sorted), 30))
+
+        for A, a in enumerate(self.amino_acids_sorted):
+            for b in np.arange(30):
+                tok = "%c_%d" % (a, b)
+                if tok in self.amino_acid_pos_generic:
+                    heatmap_generic[A, b] = self.amino_acid_pos_generic[tok]
+                if tok in self.amino_acid_pos_abs_avg:
+                    heatmap[A, b] = self.amino_acid_pos_avg[tok]
+                    heatmap_abs[A, b] = self.amino_acid_pos_abs_avg[tok]
+
+        fig, axes = plt.subplots(3)
+        fig.set_figheight(15)
+        fig.set_figwidth(15)
+        axes[0].set_title(
+            f"Mean of {'retention time' if ion == 'rt' else 'collisional cross section'} per amino acid & position"
+        )
+        im = axes[0].imshow(heatmap_generic, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[1].set_title("Mean of absolute SHAP values per amino acid & position")
+        im2 = axes[1].imshow(heatmap_abs, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        axes[2].set_title("Mean of SHAP values per amino acid & position")
+        im3 = axes[2].imshow(heatmap, cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        for ax in axes:
+            ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
+            ax.set_yticklabels(self.amino_acids_sorted, size=6)
+            ax.set_xticks(np.arange(30))
+            ax.set_xticklabels(np.arange(30), size=6)
+        fig.colorbar(im).ax.set_yscale("linear")
+        fig.colorbar(im2).ax.set_yscale("linear")
+        fig.colorbar(im3).ax.set_yscale("linear")
+        if save is not False:
+            plt.savefig(save + "/position_heatmap.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+
+    def boxplot_position(self, save="."):
+        plt.close("all")
+        fig = plt.gcf()
+        fig.set_figwidth(15)
+
+        sum_abs_sv = {}
+
+        for key in self.amino_acid_pos.keys():
+            #if key.startswith(("R", "H", "K")):
+            #    continue
+            if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
+                continue
+            sum_abs_sv[key] = mean([abs(x) for x in self.amino_acid_pos[key]])
+
+        data = {"SHAP values": [], "Amino acid - Position": []}
+
+        for aa in list(
+            dict(
+                sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
+            ).keys()
+        ):
+            for shap in self.amino_acid_pos[aa]:
+                data["SHAP values"].append(abs(shap))
+                data["Amino acid - Position"].append(aa)
+
+        df = pd.DataFrame(data)
+        figure = sns.boxplot(
+            data=df,
+            x="Amino acid - Position",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("Absolute SHAP values (with high abundance) per Amino acid and its Position")
+
+        if save is not False:
+            plt.savefig(save + "/boxplot_position.png", bbox_inches="tight")
+        else:
+            plt.show()
+
+    def full_report(self, save="."):
+        self.aa_only_plot(save=save)
+        self.position_only_plot(save=save)
+        self.position_heatmap(save=save)
+        self.boxplot_position(save=save)
+        self.position_length_plot(save=save)
+        self.position_length_plot(save=save, absolute=True)
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
-    visualization = ShapVisualization(
-        config["shap_visualization"]["sv_path"], ion=config["shap_calculator"]["ion"]
-    )
+    ion = config["shap_calculator"]["ion"]
+    if ion in {"rt", "cc"}:
+        visualization = ShapVisualizationGeneral(
+            config["shap_visualization"]["sv_path"], ion=ion
+        )
+    else:
+        visualization = ShapVisualizationIntensity(
+            config["shap_visualization"]["sv_path"], ion=ion
+        )
     visualization.full_report(
         save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
     )
-    visualization.clustering(config["shap_visualization"])
+
+    # visualization.clustering(config["shap_visualization"])

@@ -3,7 +3,7 @@ import sys
 
 import yaml
 
-from src import ShapVisualization, save_shap_values
+from src import ShapVisualizationIntensity, save_shap_values
 from src.models.model_wrappers import model_wrappers
 
 if __name__ == "__main__":
@@ -29,7 +29,7 @@ if __name__ == "__main__":
         bgd_sz=config_calculator["bgd_sz"],
     )
 
-    visualization = ShapVisualization(
+    visualization = ShapVisualizationIntensity(
         config_calculator["ion"] + "/output.parquet.gzip", config_calculator["ion"]
     )
     visualization.full_report(save=config_calculator["ion"])
