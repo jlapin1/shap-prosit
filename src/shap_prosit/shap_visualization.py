@@ -124,7 +124,7 @@ class ShapVisualization:
 
         # AA-position heatmaps
         # Consolidate lists of values into single values for each token
-        self.amino_acid_pos_inten = {
+        self.amino_acid_pos_mean_inten = {
             tok: np.mean(self.amino_acid_pos_inten[tok])
             for tok in self.amino_acid_pos_inten.keys()
             if len(self.amino_acid_pos_inten[tok]) > MIN_OCCUR_HEAT
@@ -354,8 +354,8 @@ class ShapVisualization:
         for A, a in enumerate(self.amino_acids_sorted):
             for b in np.arange(30):
                 tok = "%c_%d" % (a, -1 * (b + 1 - int(self.ion[1:].split("+")[0])))
-                if tok in self.amino_acid_pos_inten:
-                    heatmap_int[A, b] = self.amino_acid_pos_inten[tok]
+                if tok in self.amino_acid_pos_mean_inten:
+                    heatmap_int[A, b] = self.amino_acid_pos_mean_inten[tok]
                 if tok in self.amino_acid_pos_abs_avg:
                     heatmap[A, b] = self.amino_acid_pos_avg[tok]
                     heatmap_abs[A, b] = self.amino_acid_pos_abs_avg[tok]

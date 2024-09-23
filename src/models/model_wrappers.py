@@ -1,5 +1,6 @@
 import os
 from abc import ABC, abstractmethod
+from time import sleep
 from typing import Union
 
 from koinapy import Koina
@@ -100,11 +101,25 @@ class KoinaWrapper(ModelWrapper):
             "precursor_charges": inputs[:, -1].astype("int"),
             "collision_energies": (inputs[:, -2].astype("float") * 100).astype("int"),
         }
-        preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
+        counter = 0
+        success = False
+        while counter < 5 and not success:
+            try:
+                preds = self.model.predict(
+                    pd.DataFrame(input_dict), min_intensity=-0.00001
+                )
+            except:
+                print(input_dict)
+                counter += 1
+                sleep(1)
+            else:
+                success = True
+        if counter >= 5:
+            return np.zeros(len(inputs))
         if len(
             preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]
         ) < len(sequences):
-            print(sequences[0])
+            print(preds)
             results = []
             for i in range(len(sequences)):
                 if (
