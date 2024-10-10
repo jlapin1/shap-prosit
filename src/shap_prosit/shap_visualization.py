@@ -27,6 +27,7 @@ class ShapVisualization:
         sv_path: Union[str, bytes, os.PathLike],
         ion: str,
         position_combos: list | None = None,
+        filter_expr: str = None,
     ) -> None:
         if position_combos is None:
             self.position_combos = [
@@ -36,8 +37,10 @@ class ShapVisualization:
             ]
         else:
             self.position_combos = position_combos
-
         df = pd.read_parquet(sv_path)
+        df["sequence_length"] = np.vectorize(len)(df["sequence"])
+        if filter_expr is not None:
+            df = df.query(filter_expr)
         self.ion = ion
 
         # Get data from dataframe
@@ -267,6 +270,7 @@ class ShapVisualization:
                     [0, 1],
                     [number_of_aas - 2, number_of_aas - 1],
                 ],
+                filter_expr=config["filter_expr"],
             )
             visualization.full_report(
                 save=str(Path(config["sv_path"]).parent.absolute())
@@ -641,7 +645,9 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
     visualization = ShapVisualization(
-        config["shap_visualization"]["sv_path"], ion=config["shap_calculator"]["ion"]
+        sv_path=config["shap_visualization"]["sv_path"],
+        ion=config["shap_calculator"]["ion"],
+        filter_expr=config["shap_visualization"]["filter_expr"],
     )
     visualization.full_report(
         save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
