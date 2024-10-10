@@ -60,7 +60,7 @@ class IntensityModelTrainer:
         )
 
         callback = tf.keras.callbacks.ModelCheckpoint(
-            filepath="saved_model/{epoch:02d}-{val_loss:.2f}",
+            filepath="saved_model/dlomix_best/model",
             monitor="val_loss",
             verbose=0,
             save_best_only=True,
