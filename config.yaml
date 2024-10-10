@@ -7,7 +7,7 @@ shap_calculator:
   samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: "data/y5+1 Prosit2019/output.parquet.gzip"
+  sv_path: short/result.parquet.gzip
   clustering:
     from_which_end: right
     number_of_aa: 6
