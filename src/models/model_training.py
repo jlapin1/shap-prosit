@@ -15,7 +15,6 @@ class IntensityModelTrainer:
     def __init__(
         self,
         data_path: Union[str, bytes, os.PathLike],
-        val_path: Union[str, bytes, os.PathLike],
         seq_len: int = 30,
         batch_size: int = 64,
     ):
@@ -30,18 +29,12 @@ class IntensityModelTrainer:
             data_source=data_path,
             seq_length=seq_len,
             batch_size=batch_size,
-            test=False,
-        )
-
-        self.valdata = IntensityDataset(
-            data_source=val_path,
-            seq_length=seq_len,
-            batch_size=batch_size,
+            val_ratio=0.2,
             test=False,
         )
 
         print(f"Training examples: {batch_size * len(self.intdata.train_data)}")
-        print(f"Validation examples: {batch_size * len(self.valdata.train_data)}")
+        print(f"Validation examples: {batch_size * len(self.intdata.val_data)}")
 
         self.model = PrositIntensityPredictor(seq_length=seq_len)
 
@@ -72,7 +65,7 @@ class IntensityModelTrainer:
 
         self.model.fit(
             self.intdata.train_data,
-            validation_data=self.valdata.train_data,
+            validation_data=self.intdata.val_data,
             epochs=epochs,
             callbacks=callback,
         )
@@ -84,21 +77,21 @@ def main():
     """Main script to train and save the model. Also saves validation set."""
 
     trainer = IntensityModelTrainer(
-        data_path="train_data.csv", val_path="val_data.csv", seq_len=30, batch_size=64
+        data_path="intensity_data.csv", seq_len=30, batch_size=1024
     )
     model = trainer.train_model(epochs=200)
 
     # Generate background dataset and save to the file.
-    inps = []
-    for i in trainer.valdata.val_data:
-        charges = i[0]["precursor_charge"].numpy().argmax(1) + 1
-        for j in range(i[0]["sequence"].shape[0]):
-            csseq = ",".join([k.numpy().decode("utf-8") for k in i[0]["sequence"][j]])
-            ce = i[0]["collision_energy"][j].numpy()[0]
-            inp = csseq + ",%.2f,%d" % (ce, charges[j])
-            inps.append(inp)
-    with open("val_inps.csv", "w") as f:
-        f.write("\n".join(inps))
+    # inps = []
+    # for i in trainer.intdata.val_data:
+    #     charges = i[0]["precursor_charge"].numpy().argmax(1) + 1
+    #     for j in range(i[0]["sequence"].shape[0]):
+    #         csseq = ",".join([k.numpy().decode("utf-8") for k in i[0]["sequence"][j]])
+    #         ce = i[0]["collision_energy"][j].numpy()[0]
+    #         inp = csseq + ",%.2f,%d" % (ce, charges[j])
+    #         inps.append(inp)
+    # with open("val_inps_test.csv", "w") as f:
+    #     f.write("\n".join(inps))
 
 
 if __name__ == "__main__":
