@@ -3,16 +3,15 @@ from abc import ABC, abstractmethod
 from time import sleep
 from typing import Union
 
-from koinapy import Koina
+#from koinapy import Koina
 import pandas as pd
 import numpy as np
-import tensorflow as tf
+import torch as th
 import yaml
-from dlomix.models import PrositIntensityPredictor
+from . import PeptideEncoder
 from numpy import ndarray
 
-from . import TransformerModel
-
+device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -45,6 +44,8 @@ def annotations(max_len: int = 30):
                 count += 1
     return ions
 
+def tokenize_sequence(seq, dictionary):
+    return [dictionary[aa] for aa in seq]
 
 class ModelWrapper(ABC):
     @abstractmethod
@@ -58,7 +59,7 @@ class ModelWrapper(ABC):
         sequences, precursor charges and collision energy."""
         pass
 
-
+"""
 class PrositIntensityWrapper(ModelWrapper):
     def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
         self.ion_ind = annotations()[ion]
@@ -78,10 +79,54 @@ class TransformerIntensityWrapper(ModelWrapper):
         self.model = TransformerModel(**model_config)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
-
+    
     def make_prediction(self, inputs: ndarray) -> ndarray:
         return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
+"""
 
+class TorchIntensityWrapper(ModelWrapper):
+    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+        self.ion_ind = int(np.where(pd.read_csv("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/dictionary_ecd.csv")['ion']==ion)[0])
+        with open("/cmnfs/home/j.lapin/projects/shabaz/torch/yaml/model.yaml") as f: model_config = yaml.safe_load(f)
+        with open("/cmnfs/home/j.lapin/projects/shabaz/torch/yaml/loader.yaml") as f: load_config = yaml.safe_load(f)
+        num_tokens = len(open("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/token_dictionary.txt").read().strip().split("\n")) + 1
+        self.model = PeptideEncoder(
+            tokens = num_tokens,
+            max_charge = load_config['charge'][-1],
+            **model_config
+        )
+        self.model.to(device)
+        self.model.load_state_dict(th.load(path, map_location=device))
+        self.model.eval()
+        
+        self.token_dict = self.create_dictionary("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/token_dictionary.txt")
+
+    def create_dictionary(self, dictionary_path):
+        amod_dic = {
+            line.split()[0]:m for m, line in enumerate(open(dictionary_path))
+        }
+        amod_dic['X'] = len(amod_dic)
+        amod_dic[''] = amod_dic['X']
+        return amod_dic
+
+    def hx(self, tokens):
+        sequence = tokens[:,:-2]
+        intseq = th.tensor(
+            [tokenize_sequence(seq, self.token_dict) for seq in sequence], 
+            dtype=th.int32, device=device
+        )
+        charge = th.tensor(tokens[:,-1].astype(int), dtype=th.int32, device=device)
+        energy = th.tensor(tokens[:,-2].astype(float), dtype=th.float32, device=device)
+        return {
+            'intseq': intseq,
+            'charge': charge,
+            'energy': energy,
+        }
+
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+        with th.no_grad():
+            prediction = (self.model(**self.hx(inputs))[:, self.ion_ind]).detach().cpu().numpy()
+        return prediction
 
 class KoinaWrapper(ModelWrapper):
     def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
@@ -143,7 +188,8 @@ class KoinaWrapper(ModelWrapper):
 
 
 model_wrappers = {
-    "prosit": PrositIntensityWrapper,
-    "transformer": TransformerIntensityWrapper,
-    "koina": KoinaWrapper,
+    #"prosit": PrositIntensityWrapper,
+    #"transformer": TransformerIntensityWrapper,
+    "torch": TorchIntensityWrapper,
+    #"koina": KoinaWrapper,
 }

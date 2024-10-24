@@ -1,2 +1,2 @@
 from .shap_prosit import save_shap_values, ShapVisualization
-from .models import TransformerModel
+from .models import peptide_encoder

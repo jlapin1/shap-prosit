@@ -1,1 +1,1 @@
-from .transformer_model import TransformerModel
+from .peptide_encoder import PeptideEncoder

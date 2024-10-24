@@ -1,8 +1,8 @@
 shap_calculator:
   val_inps_path: val_inps.csv
-  model_path: "Prosit_2019_intensity"
-  model_type: koina
-  ion: y5+1
+  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-10-23_13-20-21/weights/model_epoch29_0.3187"
+  model_type: torch
+  ion: c5+1
   perm_path: data/y5+1 Prosit2019/perm.txt # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100

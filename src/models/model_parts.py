@@ -1,410 +1,436 @@
-"""
-TODO:
-Create new head to predict mz and ab
-"""
-
-from copy import deepcopy
+import torch as th
+from torch import nn
 import numpy as np
-import tensorflow as tf
+twopi = 2*np.pi
 
-K = tf.keras
-L = K.layers
-A = K.activations
-I = K.initializers
-gelu = tf.keras.activations.gelu
-twopi = 2 * np.pi
-
+class BatchTorch1d(nn.Module):
+    def __init__(self, units):
+        super(BatchTorch1d, self).__init__()
+        self.norm = nn.BatchNorm1d(units)
+    def forward(self, x):
+        return self.norm(x.transpose(-1,-2)).transpose(-1,-2)
 
 def get_norm_type(string):
-    if string == "layer":
-        return L.LayerNormalization
-    elif string == "batch":
-        return L.BatchNormalization
+    if string.lower() == 'layer':
+        return nn.LayerNorm
+    elif string.lower() == 'batch':
+        return BatchTorch1d
 
-
-class QKVAttention(L.Layer):
-    def __init__(self, heads, is_relpos=False, max_rel_dist=None):
+class QKVAttention(nn.Module):
+    def __init__(self,
+                 heads,
+                 dim,
+                 sl=None,
+                 is_relpos=False, 
+                 max_rel_dist=None
+    ):
         super(QKVAttention, self).__init__()
         self.heads = heads
+        self.dim = dim
+        self.sl = sl
         self.is_relpos = is_relpos
         self.maxd = max_rel_dist
-
+        
+        self.scale = dim**-0.5
+        if is_relpos:
+            assert sl is not None
+            self.maxd = sl if max_rel_dist==None else max_rel_dist
+            self.ak = self.build_relpos_tensor(sl, self.maxd) # sl, sl, dim
+            self.av = self.build_relpos_tensor(sl, self.maxd) # same
+    
     def build_relpos_tensor(self, seq_len, maxd=None):
         # This is the equivalent of an input dependent ij bias, rather than one
-        # that is a direclty learned ij tensor
-        maxd = seq_len - 1 if maxd == None else (maxd - 1 if maxd == seq_len else maxd)
-        a = tf.range(seq_len, dtype=tf.int32)
-        b = tf.range(seq_len, dtype=tf.int32)
+        # that is a directly learned ij tensor
+        maxd = seq_len-1 if maxd==None else (maxd-1 if maxd==seq_len else maxd)
+        a = th.arange(seq_len, dtype=th.int32)
+        b = th.arange(seq_len, dtype=th.int32)
         relpos = a[:, None] - b[None]
-        tsr = tf.random.normal((2 * seq_len - 1, self.dim), 0, seq_len**-0.5)
+        tsr = th.zeros(
+            2*seq_len-1, self.dim
+        ).normal_(0, seq_len**-0.5).type(th.float32)
         # set maximum distance
-        relpos = tf.clip_by_value(relpos, -maxd, maxd)
+        relpos = relpos.clamp(-maxd, maxd)
         relpos += maxd
-        tsr = tf.nn.embedding_lookup(tsr, relpos)
-        relpos_tsr = tf.Variable(tsr, trainable=True)
-
+        relpos_tsr = tsr[relpos]
+        relpos_tsr.requires_grad = True
+        
         return relpos_tsr
-
-    def build(self, x):
-        self.sl = x[1]
-        self.dim = x[-1]
-        self.scale = 1 / self.dim**0.25
-        if self.is_relpos:
-            self.ak = self.build_relpos_tensor(x[1], self.maxd)  # sl, sl, dim
-            self.av = self.build_relpos_tensor(x[1], self.maxd)  # sl, sl, dim
-
-    def call(self, Q, K, V, mask=None):
+    
+    def forward(self, Q, K, V, mask=None, bias=None, gate=None, return_full=False):
+        bsp, sl, dim = Q.shape
         # shape: batch/heads/etc, sequence_length, dim
-        QK = tf.einsum("abc,adc->abd", self.scale * Q, self.scale * K)
+        QK = self.scale * th.einsum('abc,adc->abd', Q, K)
         if self.is_relpos:
-            QK += tf.einsum("abc,bec->abe", Q, self.ak)
-        QK = tf.reshape(QK, (-1, self.heads, self.sl, K.shape[1]))
+            QK += th.einsum('abc,bec->abe', Q, self.ak)
+        QK = QK.reshape(-1, self.heads, sl, K.shape[1])
+        if bias is not None:
+            QK += bias
 
-        # mask.shape: bs, 1, 1, sl
-        mask = tf.zeros_like(QK) if mask == None else mask[:, None, None, :]
-        weights = A.softmax(QK - mask, axis=-1)
-        weights = tf.reshape(weights, (-1, self.sl, V.shape[1]))
-
-        att = tf.einsum("abc,acd->abd", weights, V)
+        # Make mask fit 4 dimensional QK matrix
+        if mask == None:
+            mask = th.zeros_like(QK)
+        elif len(mask.shape) == 2:
+            mask = mask[:, None, None, :] # for every head and query
+        elif len(mask.shape) == 3:
+            mask = mask[:, None]
+        
+        weights = th.softmax(QK-mask, dim=-1)
+        weights = weights.reshape(-1, sl, V.shape[1])
+        
+        att = th.einsum('abc,acd->abd', weights, V)
         if self.is_relpos:
-            att += tf.einsum("abc,bcd->abd", weights, self.av)
+            att += th.einsum('abc,bcd->abd', weights, self.av)
 
-        return att
+        if gate is not None:
+            att = att * gate
 
+        other = [QK, weights, att] if return_full else None
+        
+        return att, other
 
-class SelfAttention(L.Layer):
-    def __init__(self, d, h, out_units=None, alphabet=False, dropout=0):
-        super(SelfAttention, self).__init__()
+class BaseAttentionLayer(nn.Module):
+    def __init__(
+        self, 
+        indim, 
+        d, 
+        h, 
+        out_units=None, 
+        gate=False, 
+        dropout=0,
+        alphabet=False
+    ):
+        super(BaseAttentionLayer, self).__init__()
+        self.indim = indim
         self.d = d
         self.h = h
-        self.out_units = out_units
+        self.out_units = indim if out_units==None else out_units
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.alphabet = alphabet
 
-        self.qkv = L.Dense(3 * d * h, use_bias=False)
-        self.attention_layer = QKVAttention(h)
-        self.drop = L.Dropout(dropout)
-        if alphabet:
-            self.alpha = tf.Variable(1.0, trainable=True)
-            self.beta = tf.Variable(0.0, trainable=True)
-
-    def get_qkv(self, qkv):
-        Q, K, V = tf.split(qkv, 3, axis=-1)  # per: bs, sl, d*h
-        Q = tf.reshape(Q, (-1, self.sl, self.d, self.h))  # bs, sl, d, h
-        Q = tf.reshape(tf.transpose(Q, (0, 3, 1, 2)), (-1, self.sl, self.d))
-        K = tf.reshape(K, (-1, self.sl, self.d, self.h))  # bs, sl, d, h
-        K = tf.reshape(tf.transpose(K, (0, 3, 1, 2)), (-1, self.sl, self.d))
-        V = tf.reshape(V, (-1, self.sl, self.d, self.h))  # bs, sl, d, h
-        V = tf.reshape(tf.transpose(V, (0, 3, 1, 2)), (-1, self.sl, self.d))
-
-        return Q, K, V  # bs*h, sl, d
-
-    def build(self, x):
-        self.sl = x[1]
-        self.out_units = x[-1] if self.out_units == None else self.out_units
-        self.Wo = L.Dense(
-            self.out_units,
-            use_bias=False,
-            kernel_initializer=I.RandomNormal(0, 0.3 * (self.h * self.d) ** -0.5),
+        self.attention_layer = QKVAttention(h, d)
+        
+        shape = (d*h, self.out_units)
+        self.Wo = nn.Linear(*shape, bias=True)
+        self.Wo.weight = nn.Parameter( 
+            nn.init.normal_(th.empty(self.Wo.weight.shape), 0.0, 0.3*(h*d)**-0.5)
         )
+
         self.shortcut = (
-            A.linear
-            if self.out_units == x[-1]
-            else L.Dense(self.out_units, use_bias=False)
+            nn.Identity()
+            if self.out_units == indim else
+            nn.Linear(indim, out_units)
+        )
+        
+        self.gate = gate
+        if gate:
+            self.Wg = nn.Linear(indim, d*h)
+        
+        if alphabet:
+            self.alpha = nn.Parameter(th.tensor(1.), requires_grad=True)
+            self.beta = nn.Parameter(th.tensor(1.), requires_grad=True)
+        
+class SelfAttention(BaseAttentionLayer):
+    def __init__(self, 
+                 indim, 
+                 d, 
+                 h, 
+                 out_units=None, 
+                 gate=False,
+                 bias=False,
+                 bias_in_units=None,
+                 modulator=False,
+                 dropout=0,
+                 alphabet=False
+    ):
+        super().__init__(
+            indim=indim, d=d, h=h, out_units=out_units, 
+            gate=gate, dropout=dropout, alphabet=alphabet
         )
 
-    def call(self, x, mask=None):
-        # x.shape; bs, sl, units
-        qkv = self.qkv(x)  # bs, sl, 3*d*h
-        Q, K, V = self.get_qkv(qkv)  # bs*h, sl, d
-        att = self.attention_layer(Q, K, V, mask)  # bs*h, sl,  d
-        att = tf.reshape(
-            tf.transpose(tf.reshape(att, (-1, self.h, self.sl, self.d)), (0, 2, 3, 1)),
-            (-1, self.sl, self.d * self.h),
-        )  # bs, sl, d*h
-        resid = self.Wo(att)  # bs, sl, out_units
-        resid = self.drop(resid)
-        if self.alphabet:
-            output = self.alpha * self.shortcut(x) + self.beta * resid
+        self.qkv = nn.Linear(indim, 3*d*h, bias=True)
+
+        self.bias = bias
+        if bias == 'pairwise':
+            self.Wpw = nn.Linear(bias_in_units, h)
+        elif bias == 'regular':
+            self.Wb = nn.Linear(indim, h)
+        
+        self.modulator = modulator
+        if modulator:
+            self.alphaq = nn.Parameter(th.tensor(0.))
+            self.alphak = nn.Parameter(th.tensor(0.))
+            self.alphav = nn.Parameter(th.tensor(0.))
+        
+    def get_qkv(self, qkv):
+        bs, sl, units = qkv.shape
+        Q, K, V = qkv.split(units//3, -1)
+        Q = Q.reshape(-1, sl, self.d, self.h)
+        Q = Q.permute([0,3,1,2]).reshape(-1, sl, self.d)
+        K = K.reshape(-1, sl, self.d, self.h)
+        K = K.permute([0,3,1,2]).reshape(-1, sl, self.d)
+        V = V.reshape(-1, sl, self.d, self.h)
+        V = V.permute([0,3,1,2]).reshape(-1, sl, self.d)
+        if self.modulator:
+            Q *= th.sigmoid(self.alphaq)
+            K *= th.sigmoid(self.alphak)
+            V *= th.sigmoid(self.alphav)
+        
+        return Q, K, V # bs*h, sl, d
+    
+    def forward(self, x, mask=None, biastsr=None, return_full=False):
+        bs, sl, units = x.shape
+        qkv = self.qkv(x) # bs, sl, 3*d*h
+        Q, K, V = self.get_qkv(qkv) # bs*h, sl, d
+        if self.bias == 'regular':
+            B = self.Wb(x)[:,None]
+            B = B.permute([0,3,1,2])
+        elif self.bias == 'pairwise':
+            B = self.Wpw(biastsr) # bs, sl, sl, h
+            B = B.permute([0,3,1,2]) # bs, h, sl, sl
         else:
-            output = self.shortcut(x) + resid
+            B = None
+        if self.gate:
+            G = th.sigmoid(self.Wg(x)) # bs, sl, d*h
+            G = (
+                G.reshape(bs, sl, self.d, self.h)
+                .permute([0,3,1,2])
+                .reshape(bs*self.h, sl, self.d)
+            )
+        else:
+            G = None
+        att, other = self.attention_layer(Q, K, V, mask, bias=B, gate=G, return_full=return_full) # bs*h, sl, d
+        att = att.reshape(-1, self.h, sl, self.d)
+        att = att.permute([0,2,3,1])
+        att = att.reshape(-1, sl, self.d*self.h) # bs, sl, d*h
+        resid = self.Wo(att)
+        
+        if self.alphabet:
+            output = self.alpha*self.shortcut(x) + self.beta*self.drop(resid)
+        else:
+            output = self.shortcut(x) + self.drop(resid)
+        
+        other = [Q, K, V] + other + [resid] if return_full else None
+        
+        return {'out': output, 'other': other}
 
-        return output
-
-
-class CrossAttention(L.Layer):
-    def __init__(self, d, h, out_units=None, dropout=0):
-        super(CrossAttention, self).__init__()
-        self.d = d
-        self.h = h
-        self.out_units = out_units
-
-        self.Wq = L.Dense(d * h, use_bias=False)
-        self.Wkv = L.Dense(2 * d * h, use_bias=False)
-
-        self.attention_layer = QKVAttention(h)
-
-        self.drop = L.Dropout(dropout)
-
+class CrossAttention(BaseAttentionLayer):
+    def __init__(self, indim, kvindim, d, h, out_units=None, dropout=0, alphabet=False):
+        super().__init__(
+            indim=indim, d=d, h=h, out_units=out_units, 
+            dropout=dropout, alphabet=alphabet
+        )
+        
+        self.Wq = nn.Linear(indim, d*h, bias=False)
+        self.Wkv = nn.Linear(kvindim, 2*d*h, bias=False)
+        
     def get_qkv(self, q, kv):
         bs, sl, units = q.shape
-        bs, sl2, units = kv.shape
-        Q = tf.reshape(q, (bs, sl, self.d, self.h))
-        Q = tf.reshape(tf.transpose(Q, [0, 3, 1, 2]), (-1, sl, self.d))
-        K, V = tf.split(kv, 2, -1)
-        K = tf.reshape(K, (bs, sl2, self.d, self.h))
-        K = tf.reshape(tf.transpose(K, [0, 3, 1, 2]), (-1, sl2, self.d))
-        V = tf.reshape(V, (bs, sl2, self.d, self.h))
-        V = tf.reshape(tf.transpose(V, [0, 3, 1, 2]), (-1, sl2, self.d))
-
+        bs, sl2, kvunits = kv.shape
+        Q = q.reshape(bs, sl, self.d, self.h)
+        Q = Q.permute([0,3,1,2]).reshape(-1, sl, self.d)
+        K, V = kv.split(kvunits//2, -1)
+        K = K.reshape(bs, sl2, self.d, self.h)
+        K = K.permute([0,3,1,2]).reshape(-1, sl2, self.d)
+        V = V.reshape(bs, sl2, self.d, self.h)
+        V = V.permute([0,3,1,2]).reshape(-1, sl2, self.d)
+        
         return Q, K, V
-
-    def build(self, x):
-        self.sl = x[1]
-        self.out_units = x[-1] if self.out_units == None else self.out_units
-        self.Wo = L.Dense(
-            self.out_units,
-            use_bias=False,
-            kernel_initializer=I.RandomNormal(0, 0.3 * (self.h * self.d) ** -0.5),
-        )
-        self.shortcut = (
-            A.linear
-            if self.out_units == x[-1]
-            else L.Dense(self.out_units, use_bias=False)
-        )
-
-    def call(self, q_feats, kv_feats, mask=None):
+    
+    def forward(self, q_feats, kv_feats, mask=None):
+        _, slq, _ = q_feats.shape
         Q = self.Wq(q_feats)
         KV = self.Wkv(kv_feats)
         Q, K, V = self.get_qkv(Q, KV)
-        att = self.attention_layer(Q, K, V, mask)
-        att = tf.reshape(
-            tf.transpose(tf.reshape(att, (-1, self.h, self.sl, self.d)), [0, 2, 1, 3]),
-            (-1, self.sl, self.h * self.d),
-        )
+        att, other = self.attention_layer(Q, K, V, mask)
+        att = att.reshape(-1, self.h, slq, self.d)
+        att = att.permute([0,2,1,3])
+        att = att.reshape(-1, slq, self.h*self.d)
         resid = self.Wo(att)
-        resid = self.drop(resid)
+        
+        return self.shortcut(q_feats) + self.drop(resid)
 
-        return self.shortcut(q_feats) + resid
-
-
-class FFT(L.Layer):
-    def __init__(self):
-        super(FFT, self).__init__()
-
-    def call(self, x):
-        bs, sl, ch = x.shape
-        return tf.cast(
-            tf.transpose(
-                tf.signal.fft(
-                    tf.transpose(tf.signal.fft(tf.cast(x, tf.complex64)), [0, 2, 1])
-                ),
-                [0, 2, 1],
-            ),
-            tf.float32,
-        ) / (sl * ch)
-
-
-class FFTLayer(L.Layer):
-    def __init__(self, alphabet=False):
-        super(FFTLayer, self).__init__()
-        self.mixing_layer = FFT()
-        self.alphabet = alphabet
-        if alphabet:
-            self.alpha = tf.Variable(1.0, trainable=True)
-            self.beta = tf.Variable(0.0, trainable=True)
-
-    def call(self, x, **kwargs):
-        mixing_output = self.mixing_layer(x)
-        if self.alphabet:
-            output = self.alpha * x + self.beta * mixing_output
-        else:
-            output = x + mixing_output
-
-        return output
-
-
-class FFN(L.Layer):
-    def __init__(self, unit_multiplier=1, out_units=None, alphabet=False, dropout=0):
+class FFN(nn.Module):
+    def __init__(self, indim, unit_multiplier=1, out_units=None, dropout=0, alphabet=False):
         super(FFN, self).__init__()
+        self.indim = indim
         self.mult = unit_multiplier
-        self.out_units = out_units
+        self.out_units = indim if out_units==None else out_units
         self.alphabet = alphabet
 
-        self.dropout1 = L.Dropout(dropout)
-        self.dropout2 = L.Dropout(dropout)
-        if alphabet:
-            self.alpha = tf.Variable(1.0, trainable=True)
-            self.beta = tf.Variable(0.0, trainble=True)
-
-    def build(self, x):
-        self.out_units = x[-1] if self.out_units == None else self.out_units
-        self.W1 = L.Dense(x[-1] * self.mult)
-        self.W2 = L.Dense(
-            self.out_units,
-            use_bias=False,
-            kernel_initializer=I.RandomNormal(0, 0.1 * (x[-1] * self.mult) ** -0.5),
+        self.W1 = nn.Linear(indim, indim*self.mult)
+        self.W2 = nn.Linear(indim*self.mult, self.out_units, bias=False)
+        shape = self.W2.weight.shape
+        self.W2.weight = nn.Parameter( 
+            nn.init.normal_(th.empty(shape), 0.0, 0.3*(indim*self.mult)**-0.5)
         )
 
-    def call(self, x, embed=None):
-        out = self.W1(x)
-        out = self.dropout1(A.relu(out + (0 if embed == None else embed)))
-        out = self.dropout2(self.W2(out))
+        self.drop = nn.Dropout(dropout) if dropout>0 else nn.Identity()
+        
+        if alphabet:
+            self.alpha = nn.Parameter(th.tensor(1.), requires_grad=True)
+            self.beta = nn.Parameter(th.tensor(1.), requires_grad=True)
+    
+    def forward(self, x, embed=None, return_full=False):
+        out1 = self.W1(x)
+        out2 = th.relu(out1 + (0 if embed==None else embed))
+        out3 = self.W2(out2)
+        
+        other = [out1, out3] if return_full else None
+        
         if self.alphabet:
-            output = self.alpha * x + self.beta * out
+            out = self.alpha*x + self.beta*self.drop(out3)
         else:
-            output = x + out
+            out = x + self.drop(out3)
 
-        return output
+        return {'out': out, 'other': other}
 
-
-class TransBlock(L.Layer):
-    def __init__(
-        self,
-        attention_dict,
-        ffn_dict,
-        norm_type="layer",
-        prenorm=True,
-        use_embed=False,
-        preembed=True,
-        is_cross=False,
+class TransBlock(nn.Module):
+    def __init__(self,
+                 attention_dict,
+                 ffn_dict,
+                 norm_type='layer',
+                 prenorm=True,
+                 embed_type=None, # preembed | ffnembed | normembed | None
+                 embed_indim=256,
+                 is_cross=False,
+                 kvindim=256,
+                 channel_alpha=False,
     ):
         super(TransBlock, self).__init__()
         self.norm_type = norm_type
-        self.mult = ffn_dict["unit_multiplier"]
+        self.mult = ffn_dict['unit_multiplier']
         self.prenorm = prenorm
-        self.use_embed = use_embed
-        self.preembed = preembed
+        self.embed_type = embed_type
         self.is_cross = is_cross
 
-        if preembed:
-            self.alpha = tf.Variable(0.1, trainable=True)
         norm = get_norm_type(norm_type)
 
-        self.norm1 = norm()
-        self.norm2 = norm()
+        # How to embed, if at all, precursor level information (charge, energy, etc.)
+        elementwise_affine = True
+        if embed_type is not None:
+            units = attention_dict['indim']
+            if embed_type == 'preembed':
+                num = attention_dict['indim'] if channel_alpha else 1
+                self.alpha = nn.Parameter(0.1*th.ones(num), requires_grad=True)
+                units = units
+            elif embed_type == 'ffnembed':
+                units = units * self.mult
+            elif embed_type in ['normembed', 'preembed_wb']:
+                units = 2 * units
+                if embed_type == 'normembed':
+                    elementwise_affine = False
+            else:
+                raise NotImplementedError("Choose a real embedding option")
+        
+            assert type(embed_indim) == int
+            self.embed = nn.Linear(embed_indim, units)
+            
+        indim = attention_dict['indim']
+        self.norm1 = norm(indim, elementwise_affine=elementwise_affine)
+        self.norm2 = norm(ffn_dict['indim'])
         self.selfattention = SelfAttention(**attention_dict)
         if is_cross:
-            self.crossnorm = norm()
-            self.crossattention = CrossAttention(**attention_dict)
+            cross_dict = attention_dict.copy()
+            if 'pairwise_bias' in cross_dict.keys(): cross_dict.pop('pairwise_bias')
+            if 'bias_in_units' in cross_dict.keys(): cross_dict.pop('bias_in_units')
+            cross_dict['kvindim'] = kvindim
+            self.crossnorm = norm(indim)
+            self.crossattention = CrossAttention(**cross_dict)
         self.ffn = FFN(**ffn_dict)
-
-    def build(self, x):
-        if self.use_embed:
-            units = x[-1] if self.preembed else x[-1] * self.mult
-            self.embed = L.Dense(units)
-
-    def call(self, x, kv_feats=None, temb=None, spec_mask=None, seq_mask=None):
+        
+        
+    def forward(self, 
+                x, 
+                kv_feats=None, 
+                embed_feats=None, 
+                spec_mask=None, 
+                seq_mask=None,
+                biastsr=None,
+                return_full=False
+    ):
+        bs, sl, units = x.shape
         selfmask = seq_mask if self.is_cross else spec_mask
-        Temb = self.embed(temb)[:, None, :] if self.use_embed else 0
-
-        out = x + self.alpha * Temb if self.preembed else x
-        out = self.norm1(out) if self.prenorm else out
-        out = self.selfattention(out, mask=selfmask)
+        
+        out = x
+        # Embed precursor level information (?)
+        if self.embed_type is not None:
+            Emb = self.embed(embed_feats)[:,None,:]
+    
+            if self.embed_type == 'preembed':
+                out = out + self.alpha[None, None] * Emb
+                if self.prenorm: out = self.norm1(out)
+            elif self.embed_type == 'ffnembed':
+                out = self.norm1(out) if self.prenorm else out
+            elif self.embed_type in ['normembed', 'preembed_wb']:
+                weight, bias = Emb.split(units, -1)
+                weight = 1 + weight
+                bias = bias
+                if self.embed_type == 'preembed_wb':
+                    out = weight * out + bias
+                elif self.prenorm & (self.embed_type == 'normembed'): 
+                    out = weight * self.norm1(out) + bias
+        else:
+            if self.prenorm:
+                out = self.norm1(out)
+            Emb = None
+        
+        # Self attention
+        outsa = self.selfattention(out, selfmask, biastsr, return_full=return_full)
+        out = outsa['out']
+        if not self.prenorm:
+            out = self.norm1(out)
+            if self.embed_type == 'normembed':
+                out = weight * out + bias
+        
+        # Cross attention
         if self.is_cross:
             out = self.crossnorm(out) if self.prenorm else out
             out = self.crossattention(out, kv_feats, spec_mask)
             out = out if self.prenorm else self.crossnorm(out)
-        out = self.norm2(out) if self.prenorm else self.norm1(out)
-        out = self.ffn(out, None) if self.preembed else self.ffn(out, Temb)
+        
+        # FFN
+        if self.prenorm: out = self.norm2(out)
+        if self.embed_type != 'ffnembed': Emb = None
+        outffn = self.ffn(out, Emb, return_full=return_full)
+        out = outffn['out']
         out = out if self.prenorm else self.norm2(out)
+        
+        other = outsa['other'] + outffn['other'] + [out] if return_full else None
+        
+        return {'out': out, 'other': other}
 
-        return out
-
-
-class ResBlock(L.Layer):
-    """
-    residual block
-    """
-
-    def __init__(self, out_channels, ks, pad):  # use config
-        """
-        initialize residual module
-
-        :param config: configuration
-        :param outch: number of output channels
-        """
-        super(ResBlock, self).__init__()
-        self.conv1 = L.Conv1D(
-            out_channels, ks, strides=1, padding="same", use_bias=False
-        )
-        self.norm1 = L.BatchNormalization()
-        self.act = tf.nn.relu
-        self.conv2 = nn.Conv1D(
-            out_channels, ks, strides1, padding="same", use_bias=False
-        )
-        self.norm2 = nn.BatchNormalization()
-        self.shortcut = (
-            L.Conv1D(out_channels, 1, strides=1, padding="same")
-            if inch != out_channels
-            else A.linear
-        )
-
-    def forward(self, inp):
-        """
-        forward pass for residual module
-
-        :param inp: input tensor
-        :return: the block
-        """
-        out = self.conv1(inp)
-        out = self.norm1(out)
-        out = self.act(out)
-        return self.act(self.shortcut(inp) + self.norm2(self.conv2(out)))
-
-
-class CompoundConv(L.Layer):
-    """
-    compound convolution
-    """
-
-    def __init__(self, outch, rang):  # use config
-        """
-        initialize compound convolution module
-
-        :param config: configurations
-        :param outch: output channels
-        :param rang: list of filter sizes
-        """
-        super(CompoundConv, self).__init__()
-        self.convs = nn.ModuleList(
-            [L.Conv1D(outch, m, strides=1, padding="same") for m in rang]
-        )
-
-    def forward(self, inp):
-        """
-        forward pass of compound convolution module
-
-        :param inp: input tensor
-        :return: output tensor
-        """
-        return tf.concat([m(inp) for m in self.convs], axis=-1)
-
-
-class PrecursorToken(L.Layer):
-    def __init__(self, units, ff_units, min_lam, max_lam):
-        super(PrecursorToken, self).__init__()
-        self.FF = lambda t: FourierFeatures(t, min_lam, max_lam, ff_units)
-        self.linear = L.Dense(units)
-
-    def call(self, x):
-        return self.linear(self.FF(x))
-
-
-class KerasActLayer(L.Layer):
+class ActModule(nn.Module):
     def __init__(self, activation):
-        super(KerasActLayer, self).__init__()
+        super(ActModule, self).__init__()
         self.act = activation
-
-    def call(self, x):
+    def forward(self, x):
         return self.act(x)
 
-
 def FourierFeatures(t, min_lam, max_lam, embedsz):
-    x = tf.range(embedsz // 2, dtype=tf.float32)
-    x /= embedsz // 2 - 1
+    x = th.arange(embedsz//2).type(th.float32).to(t.device)
+    x /= embedsz//2 - 1
+    """embed = ( 
+        t[..., None] * 
+        th.exp(-x*log(max_lam / min_lam) )[None] /
+        (min_lam / 6.2831853)
+    )"""
     denom = (min_lam / twopi) * (max_lam / min_lam) ** x
-    if len(t.shape) == 1:
-        t = tf.expand_dims(t, -1)
-    embed = t / denom[None]
+    embed = t[...,None] / denom[None]
 
-    return tf.concat([tf.cos(embed), tf.sin(embed)], axis=-1)
+    return th.cat([embed.sin(), embed.cos()], dim=-1)
+
+def subdivide_float(x):
+    mul = -1*(x < 0).type(th.float32) + (x >= 0).type(th.float32)
+    X = abs(x)
+    a = X.floor_divide(100)
+    b = (X-a*100).floor_divide(1)
+    X_ = ((X - X.floor_divide(1))*10000).round()
+    c = X_.floor_divide(100)
+    d = (X_ - c*100).floor_divide(1)
+    
+    return mul[...,None] * th.cat([a[...,None], b[...,None], c[...,None], d[...,None]], -1)
+
+def delta_tensor(mz, shift=0):
+    return mz[..., None] - mz[:, None] + shift # bs, sl, sl
+
+
