@@ -27,6 +27,7 @@ class ShapVisualization:
         sv_path: Union[str, bytes, os.PathLike],
         ion: str,
         position_combos: list | None = None,
+        filter_expr: str = None,
     ) -> None:
         if position_combos is None:
             self.position_combos = [
@@ -38,6 +39,9 @@ class ShapVisualization:
             self.position_combos = position_combos
 
         df = pd.read_parquet(sv_path)
+        df['sequence_length'] = np.vectorize(len)(df['sequence'])
+        if filter_expr is not None:
+            df = df.query(filter_expr)
         self.ion = ion
 
         # Get data from dataframe
