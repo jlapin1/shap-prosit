@@ -85,21 +85,29 @@ class TransformerIntensityWrapper(ModelWrapper):
 """
 
 class TorchIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
-        self.ion_ind = int(np.where(pd.read_csv("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/dictionary_ecd.csv")['ion']==ion)[0])
-        with open("/cmnfs/home/j.lapin/projects/shabaz/torch/yaml/model.yaml") as f: model_config = yaml.safe_load(f)
-        with open("/cmnfs/home/j.lapin/projects/shabaz/torch/yaml/loader.yaml") as f: load_config = yaml.safe_load(f)
-        num_tokens = len(open("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/token_dictionary.txt").read().strip().split("\n")) + 1
+    def __init__(self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        ion_dict_path: Union[str, bytes, os.PathLike],
+        token_dict_path: Union[str, bytes, os.PathLike],
+        yaml_dir_path: Union[str, bytes, os.PathLike],
+        ion: str,
+    ) -> None:
+        ion_dict = pd.read_csv(ion_dict_path, index_col='full')
+        self.ion_ind = ion_dict.loc[ion]['index']
+        with open(os.path.join(yaml_dir_path, "model.yaml")) as f: model_config = yaml.safe_load(f)
+        with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: load_config = yaml.safe_load(f)
+        num_tokens = len(open(token_dict_path).read().strip().split("\n")) + 1
         self.model = PeptideEncoder(
             tokens = num_tokens,
+            final_units = len(ion_dict),
             max_charge = load_config['charge'][-1],
             **model_config
         )
         self.model.to(device)
-        self.model.load_state_dict(th.load(path, map_location=device))
+        self.model.load_state_dict(th.load(model_path, map_location=device))
         self.model.eval()
         
-        self.token_dict = self.create_dictionary("/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/token_dictionary.txt")
+        self.token_dict = self.create_dictionary(token_dict_path)
 
     def create_dictionary(self, dictionary_path):
         amod_dic = {
@@ -125,7 +133,9 @@ class TorchIntensityWrapper(ModelWrapper):
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
         with th.no_grad():
-            prediction = (self.model(**self.hx(inputs))[:, self.ion_ind]).detach().cpu().numpy()
+            out = self.model(**self.hx(inputs))
+        out = out / out.max(dim=1, keepdim=True)[0]
+        prediction = (out[:, self.ion_ind]).detach().cpu().numpy()
         return prediction
 
 class KoinaWrapper(ModelWrapper):

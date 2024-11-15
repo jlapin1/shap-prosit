@@ -1,13 +1,17 @@
 shap_calculator:
-  val_inps_path: val_inps.csv
-  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-10-23_13-20-21/weights/model_epoch29_0.3187"
+  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/ecd_shap_input.csv"
+  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-14_06-45-39/weights/model_epoch25_0.3324"
+  ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-14_06-45-39/filtered_ion_dict.csv"
+  token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/ECD/token_dictionary.txt"
+  yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-14_06-45-39/yaml"
   model_type: torch
-  ion: c5+1
-  perm_path: data/y5+1 Prosit2019/perm.txt # Path or leave empty to generate and save new permutation
+  ion: z5
+  perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
 shap_visualization:
-  sv_path: "data/y5+1 Prosit2019/output.parquet.gzip"
+  sv_path: "data/ecd/Z5/output.parquet.gzip"
   clustering:
+    run: False
     from_which_end: right
     number_of_aa: 6

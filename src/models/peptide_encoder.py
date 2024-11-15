@@ -1,6 +1,18 @@
 import torch as th
 from torch import nn
-from . import model_parts as mp
+import sys
+sys.path.append("/cmnfs/home/j.lapin/projects/shap-prosit/src/models")
+import model_parts as mp
+
+def model_init(module):
+    if isinstance(module, mp.SelfAttention):
+        module.qkv.weight = nn.init.normal_(module.qkv.weight, 0, 0.03)
+        module.qkv.bias = nn.init.zeros_(module.qkv.bias)
+        module.Wo.weight = nn.init.normal_(module.Wo.weight, 0, 0.01)
+        module.Wo.bias = nn.init.zeros_(module.Wo.bias)
+    if isinstance(module, mp.FFN):
+        module.W1.weight = nn.init.normal_(module.W1.weight, 0, 0.03)
+        module.W1.bias = nn.init.zeros_(module.W1.bias)
 
 class PeptideEncoder(nn.Module):
     def __init__(self,
@@ -99,6 +111,8 @@ class PeptideEncoder(nn.Module):
         )
 
         self.global_step = nn.Parameter(th.tensor(0), requires_grad=False)
+
+        self.apply(model_init)
 
     def Precursors(self, charge, ce):
         lst = []

@@ -40,7 +40,12 @@ class ShapCalculator:
 
     def mask_pep(self, zs, pep, bgd_inds, mask=True) -> NDArray:
         BS, SL = zs.shape
-        out = np.tile(np.array(SL*[''])[None], [BS,1])
+        """
+        With out specifying the data type, np.array(SL*['']) is automatically initialized
+        as dtype 'U1'. This array dtype silently truncated strings down to their first
+        character, which was an issue for modified amino acid strings.
+        """
+        out = np.tile(np.array(SL*[''], dtype='U12')[None], [BS,1])
         if mask:
             
             ## Collect all peptide tokens that are 'on' and place them in the out tensor
@@ -227,7 +232,11 @@ if __name__ == "__main__":
         os.makedirs(config["ion"])
 
     model_wrapper = model_wrappers[config["model_type"]](
-        path=config["model_path"], ion=config["ion"]
+        model_path=config["model_path"],
+        ion_dict_path=config['ion_dict_path'],
+        token_dict_path=config['token_dict_path'],
+        yaml_dir_path=config['yaml_dir_path'],
+        ion=config["ion"],
     )
 
     save_shap_values(

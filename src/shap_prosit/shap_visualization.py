@@ -3,6 +3,7 @@ import sys
 from operator import itemgetter
 from pathlib import Path
 from typing import Union
+import re
 
 import matplotlib
 import numpy as np
@@ -70,7 +71,7 @@ class ShapVisualization:
             self.count_positions += np.append(np.ones((le)), np.zeros((30 - le)))
 
             # Gather sum and abs sum of SV in each position
-            if self.ion[0] == "y":  # Reverse string for y-ion
+            if self.ion[0] in ["y", 'z', 'Z']:  # Reverse string for y-ion
                 self.sv_sum[:le] += sv[::-1]
                 self.sv_abs_sum[:le] += abs(sv[::-1])
             else:
@@ -148,7 +149,7 @@ class ShapVisualization:
                 self.combo_pos_sv_abs_sum.append({})
                 self.combo_inten.append({})
 
-            if self.ion[0] == "y":
+            if self.ion[0] in ["y", "z", "Z"]:
                 seq = sequence[::-1]
                 sv = shap_values[::-1]
             else:
@@ -353,7 +354,7 @@ class ShapVisualization:
 
         for A, a in enumerate(self.amino_acids_sorted):
             for b in np.arange(30):
-                tok = "%c_%d" % (a, -1 * (b + 1 - int(self.ion[1:].split("+")[0])))
+                tok = "%s_%d" % (a, -1 * (b + 1 - int(self.ion[1:].split("+")[0])))
                 if tok in self.amino_acid_pos_mean_inten:
                     heatmap_int[A, b] = self.amino_acid_pos_mean_inten[tok]
                 if tok in self.amino_acid_pos_abs_avg:
@@ -417,7 +418,7 @@ class ShapVisualization:
             )
             for l, aa1 in enumerate(self.amino_acids_sorted):
                 for m, aa2 in enumerate(self.amino_acids_sorted):
-                    tok = "%c-%c" % (aa1, aa2)
+                    tok = "%s-%s" % (aa1, aa2)
                     if tok in self.combo_pos_sv_sum[i]:
                         if len(self.combo_pos_sv_sum[i][tok]) > MIN_OCCUR_HEAT:
                             heatmap[l, m] = np.mean(self.combo_pos_sv_sum[i][tok])
@@ -450,9 +451,9 @@ class ShapVisualization:
 
         data = {"shap_value": [], "amino_acid": [], "inside_ion": []}
         for key, values in self.amino_acid_pos.items():
-            inside = True if int(key[2:]) >= 0 else False
+            inside = True if int(key.split('_')[1]) >= 0 else False
             data["shap_value"].extend(values)
-            data["amino_acid"].extend([key[0]] * len(values))
+            data["amino_acid"].extend([key.split('_')[0]] * len(values))
             data["inside_ion"].extend([inside] * len(values))
 
         plot = sns.stripplot(
@@ -501,9 +502,11 @@ class ShapVisualization:
                     sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
                 ).keys()
             ):
+                # Shorten UNIMOD modifications
+                aa_abb = re.sub('UNIMOD:', '', aa)
                 for shap in self.amino_acid_pos[aa]:
                     data["SHAP values"].append(shap)
-                    data["Amino acid - Position"].append(aa)
+                    data["Amino acid - Position"].append(aa_abb)
 
             df = pd.DataFrame(data)
             sns.boxplot(
@@ -535,9 +538,11 @@ class ShapVisualization:
                     )[:20]
                 ).keys()
             ):
+                # Shorten UNIMOD modifications
+                aa_abb = re.sub('UNIMOD:', '', aa)
                 for shap in self.amino_acid_pos[aa]:
                     data["SHAP values"].append(shap)
-                    data["Amino acid - Position"].append(aa)
+                    data["Amino acid - Position"].append(aa_abb)
 
             df = pd.DataFrame(data)
             sns.boxplot(
@@ -577,9 +582,10 @@ class ShapVisualization:
                     sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
                 ).keys()
             ):
+                aa_abb = re.sub('UNIMOD:', '', aa)
                 for shap in self.combo_pos_sv_sum[0][aa]:
                     data["SHAP values"].append(shap)
-                    data["Amino acids on positions 0:-1"].append(aa)
+                    data["Amino acids on positions 0:-1"].append(aa_abb)
 
             df = pd.DataFrame(data)
             sns.boxplot(
@@ -609,9 +615,10 @@ class ShapVisualization:
                     )[:20]
                 ).keys()
             ):
+                aa_abb = re.sub('UNIMOD:', '', aa)
                 for shap in self.combo_pos_sv_sum[0][aa]:
                     data["SHAP values"].append(shap)
-                    data["Amino acids on positions 0:-1"].append(aa)
+                    data["Amino acids on positions 0:-1"].append(aa_abb)
 
             df = pd.DataFrame(data)
             sns.boxplot(
@@ -646,4 +653,5 @@ if __name__ == "__main__":
     visualization.full_report(
         save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
     )
-    visualization.clustering(config["shap_visualization"])
+    if config['shap_visualization']['clustering']['run']:
+        visualization.clustering(config["shap_visualization"])

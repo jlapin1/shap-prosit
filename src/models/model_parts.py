@@ -56,7 +56,7 @@ class QKVAttention(nn.Module):
         
         return relpos_tsr
     
-    def forward(self, Q, K, V, mask=None, bias=None, gate=None, return_full=False):
+    def forward(self, Q, K, V, mask=None, bias=None, gate=None, return_full=False):#, before_lambda=nn.Identity(), after_lambda=nn.Identity()):
         bsp, sl, dim = Q.shape
         # shape: batch/heads/etc, sequence_length, dim
         QK = self.scale * th.einsum('abc,adc->abd', Q, K)
@@ -65,6 +65,8 @@ class QKVAttention(nn.Module):
         QK = QK.reshape(-1, self.heads, sl, K.shape[1])
         if bias is not None:
             QK += bias
+
+        #QK = before_lambda(QK)
 
         # Make mask fit 4 dimensional QK matrix
         if mask == None:
@@ -77,6 +79,8 @@ class QKVAttention(nn.Module):
         weights = th.softmax(QK-mask, dim=-1)
         weights = weights.reshape(-1, sl, V.shape[1])
         
+        #weights = after_lambda(weights)
+
         att = th.einsum('abc,acd->abd', weights, V)
         if self.is_relpos:
             att += th.einsum('abc,bcd->abd', weights, self.av)
@@ -111,9 +115,9 @@ class BaseAttentionLayer(nn.Module):
         
         shape = (d*h, self.out_units)
         self.Wo = nn.Linear(*shape, bias=True)
-        self.Wo.weight = nn.Parameter( 
-            nn.init.normal_(th.empty(self.Wo.weight.shape), 0.0, 0.3*(h*d)**-0.5)
-        )
+        #self.Wo.weight = nn.Parameter( 
+        #    nn.init.normal_(th.empty(self.Wo.weight.shape), 0.0, 0.3*(h*d)**-0.5)
+        #)
 
         self.shortcut = (
             nn.Identity()
@@ -148,6 +152,20 @@ class SelfAttention(BaseAttentionLayer):
         )
 
         self.qkv = nn.Linear(indim, 3*d*h, bias=True)
+        
+        """
+        self.before = nn.Linear(h, h, bias=False)
+        self.before.weight = nn.init.normal_(self.before.weight, 0, 0.01)
+        self.after = nn.Linear(h, h, bias=False)
+        self.after.weight = nn.init.normal_(self.after.weight, 0, 0.01)
+        self.before_lambda = lambda x: (
+            self.before(x.permute([0,2,3,1])).permute([0,3,1,2])
+        )
+        self.after_lambda = lambda x: (
+            self.after(x.reshape(-1,h,x.shape[1],x.shape[2]).permute([0,2,3,1])).
+            permute([0,3,1,2]).reshape(-1,x.shape[1],x.shape[2])
+        )
+        """
 
         self.bias = bias
         if bias == 'pairwise':
@@ -198,7 +216,7 @@ class SelfAttention(BaseAttentionLayer):
             )
         else:
             G = None
-        att, other = self.attention_layer(Q, K, V, mask, bias=B, gate=G, return_full=return_full) # bs*h, sl, d
+        att, other = self.attention_layer(Q, K, V, mask, bias=B, gate=G, return_full=return_full)#, before_lambda=self.before_lambda, after_lambda=self.after_lambda) # bs*h, sl, d
         att = att.reshape(-1, self.h, sl, self.d)
         att = att.permute([0,2,3,1])
         att = att.reshape(-1, sl, self.d*self.h) # bs, sl, d*h
