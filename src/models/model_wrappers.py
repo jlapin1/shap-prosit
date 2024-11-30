@@ -1,16 +1,21 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Union
+import warnings
 
 from koinapy import Koina
 import pandas as pd
 import numpy as np
+import keras
 import tensorflow as tf
 import yaml
 from dlomix.models import PrositIntensityPredictor
 from numpy import ndarray
 
 from . import TransformerModel
+from .ChargeState import custom_keras_utils as cutils
+from .ChargeState.chargestate import ChargeStateDistributionPredictor
+from .ChargeState.dlomix_preprocessing import to_dlomix
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -151,9 +156,60 @@ class KoinaWrapper(ModelWrapper):
                 results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
             return np.array(results)
 
+class ChargeStateWrapper(ModelWrapper):
+    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+        import ChargeState
+        self.path = "./src/models/ChargeState/trained_model.keras"
+        if path:
+            warnings.warn('''
+                            You have given a path even though this project provides a model already. 
+                            If provided a .keras model in the same form as the provided model, 
+                            the code might still work. Otherwise, stick with provided model or modify this code section.
+                            ''')
+            self.path = path
+        self.ion = ion
+        if ion != "charge":
+            warnings.warn("Ion is not named 'charge', Which is the only legal mode yet implemented. "
+                          "Using 'charge' mode anyways.")
+            self.ion = "charge"
+
+        self.model = keras.saving.load_model(
+            self.path,
+            custom_objects={
+                'upscaled_mean_squared_error': cutils.upscaled_mean_squared_error,
+                'euclidean_similarity': cutils.euclidean_similarity,
+                'masked_pearson_correlation_distance': cutils.masked_pearson_correlation_distance,
+                'masked_spectral_distance': cutils.masked_spectral_distance,
+                'ChargeStateDistributionPredictor': ChargeStateDistributionPredictor
+            }
+)
+
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+
+        # inputs["sequences"] = [["W", "E"],[],[]]
+        if self.ion == "charge":
+
+            print(type(hx(inputs)["sequence"][0]))
+
+            sequences = []
+            for seq in hx(inputs)["sequence"]:
+                try:
+                    sequence = "".join(seq)
+                except:
+                    sequence = b"".join(seq).decode("utf-8")
+                sequences.append(sequence)
+
+            input_df = pd.DataFrame()
+            input_df['peptide_sequences'] = np.array(sequences)
+
+            encoded_seqs, _ = to_dlomix(input_df)
+
+            return self.model.predict(encoded_seqs)
+
 
 model_wrappers = {
     "prosit": PrositIntensityWrapper,
     "transformer": TransformerIntensityWrapper,
     "koina": KoinaWrapper,
+    "charge": ChargeStateWrapper
 }
