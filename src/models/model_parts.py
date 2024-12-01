@@ -22,7 +22,7 @@ class QKVAttention(nn.Module):
                  dim,
                  sl=None,
                  is_relpos=False, 
-                 max_rel_dist=None
+                 max_rel_dist=None,
     ):
         super(QKVAttention, self).__init__()
         self.heads = heads
@@ -144,7 +144,9 @@ class SelfAttention(BaseAttentionLayer):
                  bias_in_units=None,
                  modulator=False,
                  dropout=0,
-                 alphabet=False
+                 alphabet=False,
+                 rotation_matrix=False,
+                 rotation_values=None,
     ):
         super().__init__(
             indim=indim, d=d, h=h, out_units=out_units, 
@@ -152,7 +154,8 @@ class SelfAttention(BaseAttentionLayer):
         )
 
         self.qkv = nn.Linear(indim, 3*d*h, bias=True)
-        
+        self.rotation_matrix = rotation_matrix
+
         """
         self.before = nn.Linear(h, h, bias=False)
         self.before.weight = nn.init.normal_(self.before.weight, 0, 0.01)
@@ -178,6 +181,25 @@ class SelfAttention(BaseAttentionLayer):
             self.alphaq = nn.Parameter(th.tensor(0.))
             self.alphak = nn.Parameter(th.tensor(0.))
             self.alphav = nn.Parameter(th.tensor(0.))
+
+        if rotation_matrix:
+            if type(rotation_values)==int:
+                values = th.arange(rotation_values, dtype=th.float32)[None]
+                min_lambda = 1
+                max_lambda = 1000
+            else:
+                values = rotation_values
+                min_lambda = 0.001
+                max_lambda = 10000
+            rcos, rsin = RotationMatrix(
+                values=values,
+                units=d,
+                min_lam=min_lambda,
+                max_lam=max_lambda,
+            )
+            self.rcos = nn.Parameter(rcos, requires_grad=False)
+            self.rsin = nn.Parameter(rsin, requires_grad=False)
+
         
     def get_qkv(self, qkv):
         bs, sl, units = qkv.shape
@@ -192,6 +214,18 @@ class SelfAttention(BaseAttentionLayer):
             Q *= th.sigmoid(self.alphaq)
             K *= th.sigmoid(self.alphak)
             V *= th.sigmoid(self.alphav)
+        
+        if self.rotation_matrix:
+            cos = self.rcos[:,:sl].tile([bs*self.h, 1, 1])
+            sin = self.rsin[:,:sl].tile([bs*self.h, 1, 1])
+            Q_ = Q*cos
+            Q_[..., ::2] += -sin[..., ::2]*Q_[..., 1::2]
+            Q_[..., 1::2] += sin[..., ::2]*Q_[..., ::2]
+            Q = Q_
+            K_ = K*cos
+            K_[..., ::2] += -sin[..., ::2]*K_[..., 1::2]
+            K_[..., 1::2] += sin[..., ::2]*K_[..., ::2]
+            K = K_
         
         return Q, K, V # bs*h, sl, d
     
@@ -451,4 +485,31 @@ def subdivide_float(x):
 def delta_tensor(mz, shift=0):
     return mz[..., None] - mz[:, None] + shift # bs, sl, sl
 
+def RotationMatrix(
+    values: th.tensor,
+    units: int,
+    min_lam: float=0.001,
+    max_lam: float=10000,
+    dense=False,
+):
+    bs, sl = values.shape
+
+    halfway = units // 2
+    d = th.arange(halfway)
+    Theta = (min_lam/twopi)*(max_lam/min_lam)**(2*d/units)
+    pos_by_theta = values[...,None] / Theta[None,None]
+    cos = np.cos(pos_by_theta)
+    sin = np.sin(pos_by_theta)
+
+    full_cos = th.tile(cos[...,None], [1,1,1,2]).reshape(cos.shape[0], cos.shape[1], -1)
+    full_sin = th.tile(sin[...,None], [1,1,1,2]).reshape(sin.shape[0], sin.shape[1], -1)
+    if dense:
+        out = th.zeros(bs, sl, units, units)
+        out[:,:,th.arange(units),th.arange(units)] = full_cos
+        out[:,:,th.arange(0,units,2),th.arange(1,units,2)] = -sin
+        out[:,:,th.arange(1,units,2),th.arange(0,units,2)] = sin
+    else:
+        out = [full_cos, full_sin]
+
+    return out
 

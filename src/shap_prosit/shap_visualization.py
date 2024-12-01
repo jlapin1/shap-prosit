@@ -21,6 +21,7 @@ matplotlib.use("Agg")
 MIN_OCCUR_AVG = 100
 MIN_OCCUR_HEAT = 15
 
+ion_extent = lambda string: int(string[1:].split('+')[0].split('^')[0])
 
 class ShapVisualization:
     def __init__(
@@ -32,8 +33,8 @@ class ShapVisualization:
         if position_combos is None:
             self.position_combos = [
                 [0, -1],
-                [int(ion[1:].split("+")[0]) - 1, 0],
-                [int(ion[1:].split("+")[0]) - 1, -1],
+                [ion_extent(ion) - 1, 0],
+                [ion_extent(ion) - 1, -1],
             ]
         else:
             self.position_combos = position_combos
@@ -91,9 +92,9 @@ class ShapVisualization:
                 # 0 is the first index in ion, positives are inside ion
                 # negatives are outside of ion
                 tok_c = (
-                    f"{am_ac}_{i + int(self.ion[1:].split('+')[0]) - le}"
+                    f"{am_ac}_{i + ion_extent(self.ion) - le}"
                     if self.ion[0] == "y"
-                    else f"{am_ac}_{int(self.ion[1:].split('+')[0]) - i - 1}"
+                    else f"{am_ac}_{ion_extent(self.ion) - i - 1}"
                 )
 
                 # Check if token already in dictionary
@@ -156,7 +157,7 @@ class ShapVisualization:
                 seq = sequence
                 sv = shap_values
 
-            ion_size = int(self.ion[1:].split("+")[0])
+            ion_size = ion_extent(self.ion)
             combo_pos = [-1 * combo[0] + ion_size - 1, -1 * combo[1] + ion_size - 1]
 
             if combo_pos[0] >= len(sequence) or combo_pos[1] >= len(sequence):
@@ -327,13 +328,13 @@ class ShapVisualization:
         axes[1].set_title("Mean shapley values for ion " + self.ion)
         im2 = axes[1].imshow(self.sv_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
         tick_range = np.arange(
-            int(self.ion[1:].split("+")[0]) - 1,
-            -1 * (30 - int(self.ion[1:].split("+")[0]) + 1),
+            ion_extent(self.ion) - 1,
+            -1 * (30 - ion_extent(self.ion) + 1),
             -1,
         )
         for ax in axes:
             ax.axvline(
-                x=int(self.ion[1:].split("+")[0]) - 0.5, color="black", linewidth=3
+                x=ion_extent(self.ion) - 0.5, color="black", linewidth=3
             )
             ax.set_yticks([])
             ax.set_yticklabels([])
@@ -354,7 +355,7 @@ class ShapVisualization:
 
         for A, a in enumerate(self.amino_acids_sorted):
             for b in np.arange(30):
-                tok = "%s_%d" % (a, -1 * (b + 1 - int(self.ion[1:].split("+")[0])))
+                tok = "%s_%d" % (a, -1 * (b + 1 - ion_extent(self.ion)))
                 if tok in self.amino_acid_pos_mean_inten:
                     heatmap_int[A, b] = self.amino_acid_pos_mean_inten[tok]
                 if tok in self.amino_acid_pos_abs_avg:
@@ -372,13 +373,13 @@ class ShapVisualization:
         im3 = axes[2].imshow(heatmap, cmap="RdBu_r", norm=TwoSlopeNorm(0))
 
         tick_range = np.arange(
-            int(self.ion[1:].split("+")[0]) - 1,
-            -1 * (30 - int(self.ion[1:].split("+")[0]) + 1),
+            ion_extent(self.ion) - 1,
+            -1 * (30 - ion_extent(self.ion) + 1),
             -1,
         )
         for ax in axes:
             ax.axvline(
-                x=int(self.ion[1:].split("+")[0]) - 0.5, color="black", linewidth=3
+                x=ion_extent(self.ion) - 0.5, color="black", linewidth=3
             )
             ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
             ax.set_yticklabels(self.amino_acids_sorted, size=6)
@@ -648,7 +649,7 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
     visualization = ShapVisualization(
-        config["shap_visualization"]["sv_path"], ion=config["shap_calculator"]["ion"]
+        config["shap_visualization"]["sv_path"], ion=config["shap_visualization"]["ion"]
     )
     visualization.full_report(
         save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())

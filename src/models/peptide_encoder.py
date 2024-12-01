@@ -1,8 +1,6 @@
 import torch as th
 from torch import nn
-import sys
-sys.path.append("/cmnfs/home/j.lapin/projects/shap-prosit/src/models")
-import model_parts as mp
+import src.models.model_parts as mp
 
 def model_init(module):
     if isinstance(module, mp.SelfAttention):
@@ -26,6 +24,7 @@ class PeptideEncoder(nn.Module):
                  ffn_mult=2,
                  dropout=0,
                  alphabet=False,
+                 rotation_matrix=False,
                  prenorm=False,
                  norm_type='layer',
                  depth=6,
@@ -73,6 +72,8 @@ class PeptideEncoder(nn.Module):
             'h': h,
             'dropout': dropout,
             'alphabet': alphabet,
+            'rotation_matrix': rotation_matrix,
+            'rotation_values': 100,
         }
         ffn_dict = {
             'indim': running_units,
