@@ -30,7 +30,10 @@ if __name__ == "__main__":
     )
 
     visualization = ShapVisualizationIntensity(
-        config_calculator["ion"] + "/output.parquet.gzip", config_calculator["ion"]
+        sv_path=config_calculator["ion"] + "/output.parquet.gzip",
+        ion=config_calculator["ion"],
+        filter_expr=config["shap_visualization"]["filter_expr"],
     )
+    
     visualization.full_report(save=config_calculator["ion"])
     visualization.clustering(config["shap_visualization"])

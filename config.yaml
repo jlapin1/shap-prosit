@@ -11,4 +11,4 @@ shap_visualization:
   clustering:
     from_which_end: left
     number_of_aa: 4
-
+  filter_expr: 

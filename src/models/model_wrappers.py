@@ -1,5 +1,6 @@
 import os
 from abc import ABC, abstractmethod
+from time import sleep
 from typing import Union
 import warnings
 
@@ -16,6 +17,7 @@ from . import TransformerModel
 from .ChargeState import custom_keras_utils as cutils
 from .ChargeState.chargestate import ChargeStateDistributionPredictor
 from .ChargeState.dlomix_preprocessing import to_dlomix
+
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -131,29 +133,51 @@ class KoinaWrapper(ModelWrapper):
 
         else:
             # stuff for intensity model
-            sequences = []
-            for i in inputs[:, :-2]:
-                try:
-                    seq = "".join(i)
-                except:
-                    seq = b"".join(i).decode("utf-8")
-                sequences.append(seq)
+            seq = b"".join(i).decode("utf-8")
+            sequences.append(seq)
             input_dict = {
                 "peptide_sequences": np.array(sequences),
-                "precursor_charges": inputs[:, -2].astype("float"),
-                "collision_energies": inputs[:, -1].astype("float"),
+                "precursor_charges": inputs[:, -1].astype("int"),
+                "collision_energies": (inputs[:, -2].astype("float") * 100).astype("int"),
             }
-            preds = self.model.predict(pd.DataFrame(input_dict), min_intensity=-0.00001)
-            if len(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]) < len(sequences):
-                print(sequences[0])
+            counter = 0
+            success = False
+            while counter < 5 and not success:
+                try:
+                    preds = self.model.predict(
+                        pd.DataFrame(input_dict), min_intensity=-0.00001
+                    )
+                except:
+                    print(input_dict)
+                    counter += 1
+                    sleep(1)
+                else:
+                    success = True
+            if counter >= 5:
+                return np.zeros(len(inputs))
+            if len(
+                preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]
+            ) < len(sequences):
+                print(preds)
                 results = []
                 for i in range(len(sequences)):
-                    if i not in preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].index:
+                    if (
+                        i
+                        not in preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                            "intensities"
+                        ].index
+                    ):
                         results.append(0.0)
                     else:
-                        results.append(preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"][i])
+                        results.append(
+                            preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                                "intensities"
+                            ][i]
+                        )
             else:
-                results = preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"].to_numpy()
+                results = preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                    "intensities"
+                ].to_numpy()
             return np.array(results)
 
 class ChargeStateWrapper(ModelWrapper):
