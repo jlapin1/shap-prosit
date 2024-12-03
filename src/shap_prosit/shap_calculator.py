@@ -37,7 +37,12 @@ class ShapCalculator:
 
         self.bgd_sz = bgd.shape[0]
 
-        self.ext = int(ion[1:].split("+")[0])
+
+        if ion in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+            self.ext = 0
+        else:
+            self.ext = int(ion[1:].split("+")[0])
+        self.ion = ion
 
         self.fnull = np.array(
             [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
@@ -174,7 +179,9 @@ class ShapCalculator:
         seq = list(inp_orig.squeeze())
         seqrep = seq[:pl]
         # print(seqrep)
+
         inten = float(orig_spec.numpy().squeeze())
+
         # print("Calculated intensity: %f"%inten)
         # print("fnull: %f"%ex.fnull)
         # print("Expectation value: %f"%ex.expected_value)
@@ -226,6 +233,8 @@ def save_shap_values(
         "charge": [],
         "bgd_mean": [],
     }
+    # PUT IT BACK AFTER USAGE
+    # for INDEX in range(100):
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         out_dict = sc.calc_shap_values(INDEX, samp=samp)
