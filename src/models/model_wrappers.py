@@ -109,7 +109,7 @@ class KoinaWrapper(ModelWrapper):
                 sequences.append(sequence)
 
             input_df = pd.DataFrame()
-            input_df['peptide_sequences'] = np.array(sequences)
+            input_df["peptide_sequences"] = np.array(sequences)
 
             return (self.model.predict(input_df)["irt"]).to_numpy()
 
@@ -124,21 +124,27 @@ class KoinaWrapper(ModelWrapper):
                 sequences.append(sequence)
 
             input_df = pd.DataFrame()
-            input_df['peptide_sequences'] = np.array(sequences)
-            input_df['precursor_charges'] = inputs[:, -1].astype("int")
-            print(input_df['peptide_sequences'])
-            print(input_df['precursor_charges'])
-            assert len(input_df.shape)==2, f"shape is not 2-dimensional\n{input_df}"
+            input_df["peptide_sequences"] = np.array(sequences)
+            input_df["precursor_charges"] = inputs[:, -1].astype("int")
+            print(input_df["peptide_sequences"])
+            print(input_df["precursor_charges"])
+            assert len(input_df.shape) == 2, f"shape is not 2-dimensional\n{input_df}"
             return (self.model.predict(input_df)["ccs"]).to_numpy()
 
         else:
-            # stuff for intensity model
-            seq = b"".join(i).decode("utf-8")
-            sequences.append(seq)
+            sequences = []
+            for i in inputs[:, :-2]:
+                try:
+                    seq = "".join(i)
+                except:
+                    seq = b"".join(i).decode("utf-8")
+                sequences.append(seq)
             input_dict = {
                 "peptide_sequences": np.array(sequences),
                 "precursor_charges": inputs[:, -1].astype("int"),
-                "collision_energies": (inputs[:, -2].astype("float") * 100).astype("int"),
+                "collision_energies": (inputs[:, -2].astype("float") * 100).astype(
+                    "int"
+                ),
             }
             counter = 0
             success = False
@@ -180,29 +186,33 @@ class KoinaWrapper(ModelWrapper):
                 ].to_numpy()
             return np.array(results)
 
+
 class ChargeStateWrapper(ModelWrapper):
     def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
         import ChargeState
+
         self.path = "./src/models/ChargeState/trained_model.keras"
         if path:
-            warnings.warn('''
-                            You have given a path even though this project provides a model already. 
-                            If provided a .keras model in the same form as the provided model, 
+            warnings.warn(
+                """
+                            You have given a path even though this project provides a model already.
+                            If provided a .keras model in the same form as the provided model,
                             the code might still work. Otherwise, stick with provided model or modify this code section.
-                            ''')
+                            """
+            )
             self.path = path
         self.ion = ion[-1]
 
         self.model = keras.saving.load_model(
             self.path,
             custom_objects={
-                'upscaled_mean_squared_error': cutils.upscaled_mean_squared_error,
-                'euclidean_similarity': cutils.euclidean_similarity,
-                'masked_pearson_correlation_distance': cutils.masked_pearson_correlation_distance,
-                'masked_spectral_distance': cutils.masked_spectral_distance,
-                'ChargeStateDistributionPredictor': ChargeStateDistributionPredictor
-            }
-)
+                "upscaled_mean_squared_error": cutils.upscaled_mean_squared_error,
+                "euclidean_similarity": cutils.euclidean_similarity,
+                "masked_pearson_correlation_distance": cutils.masked_pearson_correlation_distance,
+                "masked_spectral_distance": cutils.masked_spectral_distance,
+                "ChargeStateDistributionPredictor": ChargeStateDistributionPredictor,
+            },
+        )
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
 
@@ -219,16 +229,16 @@ class ChargeStateWrapper(ModelWrapper):
             sequences.append(sequence)
 
         input_df = pd.DataFrame()
-        input_df['peptide_sequences'] = np.array(sequences)
+        input_df["peptide_sequences"] = np.array(sequences)
 
         encoded_seqs, _ = to_dlomix(input_df)
 
-        return self.model.predict(encoded_seqs)[:,int(self.ion)-1]
+        return self.model.predict(encoded_seqs)[:, int(self.ion) - 1]
 
 
 model_wrappers = {
     "prosit": PrositIntensityWrapper,
     "transformer": TransformerIntensityWrapper,
     "koina": KoinaWrapper,
-    "charge": ChargeStateWrapper
+    "charge": ChargeStateWrapper,
 }
