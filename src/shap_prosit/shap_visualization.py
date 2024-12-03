@@ -771,7 +771,10 @@ class ShapVisualizationGeneral():
         df = pd.DataFrame(position_length_dict)
         df = df.reindex(sorted(df.columns), axis=1)
         df.index += 1
+        #min_abundancy = df[df > 0].count() >= 10
+        #df = df.loc[:, min_abundancy]
         df = df.transpose()
+
         plt.figure(figsize=(24, 16))
         mask = df.isnull()
         if absolute:
@@ -779,6 +782,7 @@ class ShapVisualizationGeneral():
         else:
             cmap = sns.color_palette('RdBu_r', as_cmap=True)
         cmap.set_bad(color="lightgray")
+        # mask for zeros maybe? Add abundancy filter.
         ax = sns.heatmap(df, annot=True, cmap=cmap, mask=mask, linewidths=0.5, linecolor='gray', edgecolor='gray')
         #ax.invert_yaxis()
 
@@ -829,6 +833,48 @@ class ShapVisualizationGeneral():
         else:
             plt.show()
 
+    def relative_position_heatmap(self, save=False):
+        plt.close("all")
+
+        rel_pos_per_aa_shap = defaultdict(list)
+        rel_pos_per_aa_generic = defaultdict(list)
+        for peptide, shap_values in zip(self.seq_list, self.shap_values_list):
+            # {amino_acid: (rel_pos between 0 & 1, shap_value)}
+            peptide_len = len(peptide)
+            for position, amino_acid in enumerate(peptide):
+                rel_pos = position/peptide_len
+                if rel_pos < 0 or rel_pos > 1:
+                    print(rel_pos)
+                rel_pos_per_aa_shap[amino_acid].append((rel_pos, shap_values[position]))
+                # generic means either retention time or collisional cross-section
+                #tok = f"{amino_acid}_{position}"
+                #if tok in self.amino_acid_pos_generic:
+                #    rel_pos_per_aa_generic[amino_acid].append((rel_pos, self.amino_acid_pos_generic[tok]))
+
+        rows = []
+        for amino_acid, values in rel_pos_per_aa_shap.items():
+            for pos, shap in values:
+                rows.append([amino_acid, pos, shap])
+
+        bins = np.linspace(0, 1, 21)
+        print(bins)
+        df = pd.DataFrame(rows, columns=["amino acid", "relative position", "shap value"])
+        df['binned position'] = (
+            pd.cut(df['relative position'], bins=bins, labels=np.round(bins[:-1], 2), include_lowest=True)
+        )
+        print(df)
+
+        heatmap_data = df.pivot_table(index='amino acid', columns='binned position', values='shap value',
+                                      aggfunc='mean')
+        plt.figure(figsize=(24, 16))
+        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, cbar_kws={'label': 'SHAP value'})
+        plt.title('Heatmap of SHAP Values by Amino Acid and Binned Relative Position')
+
+        if save is not False:
+            plt.savefig(save + "/relative_position_heatmap.png", bbox_inches="tight")
+        else:
+            plt.show()
+
 
     def boxplot_position(self, save="."):
         plt.close("all")
@@ -875,6 +921,7 @@ class ShapVisualizationGeneral():
         self.boxplot_position(save=save)
         self.position_length_plot(save=save)
         self.position_length_plot(save=save, absolute=True)
+        self.relative_position_heatmap(save=save)
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:

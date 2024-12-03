@@ -38,7 +38,7 @@ class ShapCalculator:
         self.bgd_sz = bgd.shape[0]
 
 
-        if ion in {"rt", "cc", "charge"}:
+        if ion in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
             self.ext = 0
         else:
             self.ext = int(ion[1:].split("+")[0])
@@ -161,10 +161,7 @@ class ShapCalculator:
 
         # Input coalition vector: All aa's on (1) + charge + eV
         # - Padded amino acids are added in as all ones (always on) in ens_pred
-        if self.ion == "charge":
-            inpvec = np.ones((6, pl + 2))
-        else:
-            inpvec = np.ones((1, pl + 2))
+        inpvec = np.ones((1, pl + 2))
 
         # Mask vector is peptide length all off
         # - By turning charge and eV on, I am ignoring there contribution
@@ -182,11 +179,9 @@ class ShapCalculator:
         seq = list(inp_orig.squeeze())
         seqrep = seq[:pl]
         # print(seqrep)
-        ### WATCH THIS CRUTIAL SECTION ### ask Maksim ###
-        if orig_spec.shape == (1):
-            inten = float(orig_spec.numpy().squeeze())
-        else:
-            inten = orig_spec.numpy().squeeze().astype(float)
+
+        inten = float(orig_spec.numpy().squeeze())
+
         # print("Calculated intensity: %f"%inten)
         # print("fnull: %f"%ex.fnull)
         # print("Expectation value: %f"%ex.expected_value)

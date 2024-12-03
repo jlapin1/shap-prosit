@@ -167,11 +167,7 @@ class ChargeStateWrapper(ModelWrapper):
                             the code might still work. Otherwise, stick with provided model or modify this code section.
                             ''')
             self.path = path
-        self.ion = ion
-        if ion != "charge":
-            warnings.warn("Ion is not named 'charge', Which is the only legal mode yet implemented. "
-                          "Using 'charge' mode anyways.")
-            self.ion = "charge"
+        self.ion = ion[-1]
 
         self.model = keras.saving.load_model(
             self.path,
@@ -187,24 +183,23 @@ class ChargeStateWrapper(ModelWrapper):
     def make_prediction(self, inputs: ndarray) -> ndarray:
 
         # inputs["sequences"] = [["W", "E"],[],[]]
-        if self.ion == "charge":
 
-            print(type(hx(inputs)["sequence"][0]))
+        print(type(hx(inputs)["sequence"][0]))
 
-            sequences = []
-            for seq in hx(inputs)["sequence"]:
-                try:
-                    sequence = "".join(seq)
-                except:
-                    sequence = b"".join(seq).decode("utf-8")
-                sequences.append(sequence)
+        sequences = []
+        for seq in hx(inputs)["sequence"]:
+            try:
+                sequence = "".join(seq)
+            except:
+                sequence = b"".join(seq).decode("utf-8")
+            sequences.append(sequence)
 
-            input_df = pd.DataFrame()
-            input_df['peptide_sequences'] = np.array(sequences)
+        input_df = pd.DataFrame()
+        input_df['peptide_sequences'] = np.array(sequences)
 
-            encoded_seqs, _ = to_dlomix(input_df)
+        encoded_seqs, _ = to_dlomix(input_df)
 
-            return self.model.predict(encoded_seqs)
+        return self.model.predict(encoded_seqs)[:,int(self.ion)-1]
 
 
 model_wrappers = {
