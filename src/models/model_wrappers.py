@@ -218,7 +218,7 @@ class ChargeStateWrapper(ModelWrapper):
 
         # inputs["sequences"] = [["W", "E"],[],[]]
 
-        print(type(hx(inputs)["sequence"][0]))
+        # print(type(hx(inputs)["sequence"][0]))
 
         sequences = []
         for seq in hx(inputs)["sequence"]:
