@@ -2,7 +2,7 @@ shap_calculator:
   val_inps_path: val_inps.csv
   model_path: #IM2Deep
   model_type: charge
-  ion: charge1 #y0+1 for viz
+  mode: charge1 #y0+1 for viz
   perm_path: #data/y5+1 Prosit2019/perm.txt # Path or leave empty to generate and save new permutation
   samp: 20
   bgd_sz: 5

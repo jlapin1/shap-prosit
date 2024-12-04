@@ -974,8 +974,8 @@ class ShapVisualizationGeneral():
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
-    ion = config["shap_calculator"]["ion"]
-    if ion in {"rt", "cc"}:
+    ion = config["shap_calculator"]["mode"]
+    if ion in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
         visualization = ShapVisualizationGeneral(
             config["shap_visualization"]["sv_path"], ion=ion
         )

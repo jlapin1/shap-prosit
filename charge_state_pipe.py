@@ -18,7 +18,7 @@ shap_calculator:
   val_inps_path: val_inps.csv
   model_path: 
   model_type: charge
-  ion: charge{charge}
+  mode: charge{charge}
   perm_path: {perm_path} 
   samp: {samp}
   bgd_sz: {bgd_sz}

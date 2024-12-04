@@ -53,7 +53,7 @@ def annotations(max_len: int = 30):
 
 class ModelWrapper(ABC):
     @abstractmethod
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
         """Initialize model wrapper by loading the model."""
         pass
 
@@ -65,8 +65,8 @@ class ModelWrapper(ABC):
 
 
 class PrositIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
-        self.ion_ind = annotations()[ion]
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+        self.ion_ind = annotations()[mode]
         self.model = PrositIntensityPredictor(seq_length=30)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
@@ -76,8 +76,8 @@ class PrositIntensityWrapper(ModelWrapper):
 
 
 class TransformerIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
-        self.ion_ind = annotations()[ion]
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+        self.ion_ind = annotations()[mode]
         with open(os.path.join(path, "model.yaml"), encoding="utf-8") as file:
             model_config = yaml.safe_load(file)
         self.model = TransformerModel(**model_config)
@@ -89,14 +89,14 @@ class TransformerIntensityWrapper(ModelWrapper):
 
 
 class KoinaWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
         self.model = Koina(path)
-        self.ion = ion
+        self.mode = mode
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
-        # set ion = "rt" to enter retention time mode
+        # set mode = "rt" to enter retention time mode
         # inputs["sequences"] = [["W", "E"],[],[]]
-        if self.ion == "rt":
+        if self.mode == "rt":
 
             print(type(hx(inputs)["sequence"][0]))
 
@@ -113,8 +113,8 @@ class KoinaWrapper(ModelWrapper):
 
             return (self.model.predict(input_df)["irt"]).to_numpy()
 
-        elif self.ion == "cc":
-            # set ion = "cc" to enter retention time mode
+        elif self.mode == "cc":
+            # set mode = "cc" to enter retention time mode
             sequences = []
             for seq in hx(inputs)["sequence"]:
                 try:
@@ -162,33 +162,33 @@ class KoinaWrapper(ModelWrapper):
             if counter >= 5:
                 return np.zeros(len(inputs))
             if len(
-                preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]
+                preds[preds["annotation"] == bytes(self.mode, "utf-8")]["intensities"]
             ) < len(sequences):
                 print(preds)
                 results = []
                 for i in range(len(sequences)):
                     if (
                         i
-                        not in preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                        not in preds[preds["annotation"] == bytes(self.mode, "utf-8")][
                             "intensities"
                         ].index
                     ):
                         results.append(0.0)
                     else:
                         results.append(
-                            preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                            preds[preds["annotation"] == bytes(self.mode, "utf-8")][
                                 "intensities"
                             ][i]
                         )
             else:
-                results = preds[preds["annotation"] == bytes(self.ion, "utf-8")][
+                results = preds[preds["annotation"] == bytes(self.mode, "utf-8")][
                     "intensities"
                 ].to_numpy()
             return np.array(results)
 
 
 class ChargeStateWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
         import ChargeState
 
         self.path = "./src/models/ChargeState/trained_model.keras"
@@ -201,7 +201,7 @@ class ChargeStateWrapper(ModelWrapper):
                             """
             )
             self.path = path
-        self.ion = ion[-1]
+        self.mode = mode[-1]
 
         self.model = keras.saving.load_model(
             self.path,
@@ -233,7 +233,7 @@ class ChargeStateWrapper(ModelWrapper):
 
         encoded_seqs, _ = to_dlomix(input_df)
 
-        return self.model.predict(encoded_seqs)[:, int(self.ion) - 1]
+        return self.model.predict(encoded_seqs)[:, int(self.mode) - 1]
 
 
 model_wrappers = {

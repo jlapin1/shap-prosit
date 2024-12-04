@@ -22,7 +22,7 @@ tf.get_logger().setLevel(logging.ERROR)
 class ShapCalculator:
     def __init__(
         self,
-        ion: str,
+        mode: str,
         dset: NDArray,
         bgd: NDArray,
         model_wrapper: ModelWrapper,
@@ -38,11 +38,11 @@ class ShapCalculator:
         self.bgd_sz = bgd.shape[0]
 
 
-        if ion in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+        if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
             self.ext = 0
         else:
-            self.ext = int(ion[1:].split("+")[0])
-        self.ion = ion
+            self.ext = int(mode[1:].split("+")[0])
+        self.mode = mode
 
         self.fnull = np.array(
             [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
@@ -203,7 +203,7 @@ class ShapCalculator:
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
     model_wrapper: ModelWrapper,
-    ion: str,
+    mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
     samp: int = 1000,
@@ -220,7 +220,7 @@ def save_shap_values(
     bgd = val_data[perm[:bgd_sz]]
     val = val_data[perm[bgd_sz:]]
 
-    sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
+    sc = ShapCalculator(mode, val, bgd, model_wrapper=model_wrapper)
 
     bgd_pred = model_wrapper.make_prediction(bgd)
     bgd_mean = np.mean(bgd_pred)
@@ -253,19 +253,19 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
 
-    if not os.path.exists(config["ion"]):
-        os.makedirs(config["ion"])
+    if not os.path.exists(config["mode"]):
+        os.makedirs(config["mode"])
 
     model_wrapper = model_wrappers[config["model_type"]](
-        path=config["model_path"], ion=config["ion"]
+        path=config["model_path"], mode=config["mode"]
     )
 
     save_shap_values(
         val_data_path=config["val_inps_path"],
         model_wrapper=model_wrapper,
-        ion=config["ion"],
+        mode=config["mode"],
         perm_path=config["perm_path"],
-        output_path=config["ion"],
+        output_path=config["mode"],
         samp=config["samp"],
         bgd_sz=config["bgd_sz"],
     )
