@@ -14,8 +14,8 @@ shap_calculator:
   yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-30_05-33-17/yaml"
   
 shap_visualization:
-  ion: y5
-  sv_path: "y5/output.parquet.gzip"
+  ion: Z5
+  sv_path: "data/ecd/ecd_241115/Z5/output.parquet.gzip"
   clustering:
     run: False
     from_which_end: right

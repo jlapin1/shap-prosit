@@ -23,6 +23,8 @@ MIN_OCCUR_HEAT = 15
 
 ion_extent = lambda string: int(string[1:].split('+')[0].split('^')[0])
 
+reverse_ion_list = ["x", "X", "y", "z", "Z"]
+
 class ShapVisualization:
     def __init__(
         self,
@@ -72,7 +74,7 @@ class ShapVisualization:
             self.count_positions += np.append(np.ones((le)), np.zeros((30 - le)))
 
             # Gather sum and abs sum of SV in each position
-            if self.ion[0] in ["y", 'z', 'Z']:  # Reverse string for y-ion
+            if self.ion[0] in reverse_ion_list:  # Reverse string for y-ion
                 self.sv_sum[:le] += sv[::-1]
                 self.sv_abs_sum[:le] += abs(sv[::-1])
             else:
@@ -93,7 +95,7 @@ class ShapVisualization:
                 # negatives are outside of ion
                 tok_c = (
                     f"{am_ac}_{i + ion_extent(self.ion) - le}"
-                    if self.ion[0] == "y"
+                    if self.ion[0] in reverse_ion_list
                     else f"{am_ac}_{ion_extent(self.ion) - i - 1}"
                 )
 
