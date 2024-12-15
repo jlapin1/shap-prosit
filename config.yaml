@@ -1,17 +1,22 @@
 shap_calculator:
   # SHAP calculation settings
-  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/uvpd_shap_input.csv"
-  ion: x5
+  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
+  output_dir: UVPD_A5
+  ion: A5
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
+  inputs_ignored: 3
+  queries:
+    - "method == 'UVPD'"
   
   # Reconstituting a saved torch model
   model_type: torch
-  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-30_05-33-17/weights/model_epoch28_0.2856"
-  ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-30_05-33-17/filtered_ion_dict.csv"
-  token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/UVPD/token_dictionary.txt"
-  yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-30_05-33-17/yaml"
+  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569"
+  ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/filtered_ion_dict.csv"
+  token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
+  yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/yaml"
+  method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
   
 shap_visualization:
   ion: Z5

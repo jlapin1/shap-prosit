@@ -1,6 +1,8 @@
 import torch as th
 from torch import nn
-import src.models.model_parts as mp
+import sys
+sys.path.append("/cmnfs/home/j.lapin/projects/shap-prosit/src/models")
+import model_parts as mp
 
 def model_init(module):
     if isinstance(module, mp.SelfAttention):
@@ -19,6 +21,7 @@ class PeptideEncoder(nn.Module):
                  final_units=174,
                  tokens=30,
                  max_charge=8,
+                 num_methods=None,
                  d=64,
                  h=8,
                  ffn_mult=2,
@@ -32,12 +35,14 @@ class PeptideEncoder(nn.Module):
                  prec_units=256,
                  use_charge=True,
                  use_energy=False,
+                 use_method=False,
                  final_act='identity'
                  ):
         super(PeptideEncoder, self).__init__()
         self.use_charge = use_charge
         self.use_energy = use_energy
-        self.at_least_1 = self.use_charge or self.use_energy
+        self.use_method = use_method
+        self.at_least_1 = self.use_charge or self.use_energy or self.use_method
 
         # Positional information
         arng = th.arange(0, 100, 1, dtype=th.float32)
@@ -55,13 +60,16 @@ class PeptideEncoder(nn.Module):
         self.sequence_embedding = nn.Embedding(tokens, running_units)
         
         # Precursor information
-        self.prec_units = prec_units
+        self.prec_type = prec_type
+        self.prec_units = running_units if prec_type == 'pretoken' else prec_units
         if prec_type in ['pretoken', 'preembed', 'preembed_wb']:
             if use_charge:
                 self.charge_embedder = nn.Embedding(max_charge, prec_units)
             if use_energy:
                 self.ce_embedder = nn.Linear(prec_units, prec_units)
-        self.num = sum([use_charge, use_energy])
+            if use_method:
+                self.method_embedder = nn.Embedding(num_methods, prec_units)
+        self.num = sum([use_charge, use_energy, use_method])
         if self.num > 0:
             self.unite_precursors = nn.Linear(self.num*prec_units, prec_units)
         
@@ -87,7 +95,11 @@ class PeptideEncoder(nn.Module):
                 ffn_dict, 
                 prenorm=prenorm, 
                 norm_type=norm_type, 
-                embed_type=prec_type if self.at_least_1 else None,
+                embed_type=(
+                    prec_type if 
+                    (self.at_least_1 and prec_type in ['preembed', 'preembed_wb']) 
+                    else None
+                ),
                 embed_indim=prec_units,
                 is_cross=False,
                 channel_alpha=True,
@@ -115,26 +127,31 @@ class PeptideEncoder(nn.Module):
 
         self.apply(model_init)
 
-    def Precursors(self, charge, ce):
+    def Precursors(self, charge, ce, method):
         lst = []
         if self.use_charge:
             lst.append(self.charge_embedder(charge-1))
         if self.use_energy:
             lst.append(
                 self.ce_embedder(
-                    mp.FourierFeatures(ce, 0.01, 1.5, self.prec_units)
+                    mp.FourierFeatures(ce, 1, 150, self.prec_units)
                 )
             )
+        if self.use_method:
+            lst.append(self.method_embedder(method))
         joined = nn.functional.silu(th.cat(lst, dim=-1))
         precursor_embedding = self.unite_precursors(joined)
 
         return precursor_embedding
 
-    def forward(self, intseq, charge=None, energy=None):
+    def forward(self, intseq, charge=None, energy=None, method=None):
         sequence = self.sequence_embedding(intseq)
         out = sequence + self.alpha_pos*self.pos[:intseq.shape[1]][None]
 
-        PreEmb = self.Precursors(charge, energy) if self.at_least_1 else None
+        PreEmb = self.Precursors(charge, energy, method) if self.at_least_1 else None
+        if self.at_least_1 and (self.prec_type == 'pretoken'):
+            out = th.cat([PreEmb[:,None], out], axis=1)
+            PreEmb = None
 
         for layer in self.main:
             out = layer(out, embed_feats=PreEmb)

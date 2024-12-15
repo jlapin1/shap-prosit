@@ -1,3 +1,14 @@
+"""
+All model wrappers must have a make_prediction function that:
+- converts linearized string vectors to model ready inputs
+- runs inputs through the model
+- returns the output of interest
+
+Converting the SHAP linearized numpy string array input 
+e.g. [seq,charge,energy,method] to model ready outputs is done
+using the function def hx(inputs).
+"""
+
 import os
 from abc import ABC, abstractmethod
 from time import sleep
@@ -44,7 +55,7 @@ def annotations(max_len: int = 30):
                 count += 1
     return ions
 
-def tokenize_sequence(seq, dictionary):
+def integerize_sequence(seq, dictionary):
     return [dictionary[aa] for aa in seq]
 
 class ModelWrapper(ABC):
@@ -91,6 +102,7 @@ class TorchIntensityWrapper(ModelWrapper):
         token_dict_path: Union[str, bytes, os.PathLike],
         yaml_dir_path: Union[str, bytes, os.PathLike],
         ion: str,
+        method_list: list,
     ) -> None:
         ion_dict = pd.read_csv(ion_dict_path, index_col='full')
         self.ion_ind = ion_dict.loc[ion]['index']
@@ -109,6 +121,10 @@ class TorchIntensityWrapper(ModelWrapper):
         
         self.token_dict = self.create_dictionary(token_dict_path)
 
+        # Same code as in loader_hf.py
+        self.method_dic = {method: m for m, method in enumerate(method_list)}
+        self.method_dicr = {n:m for m,n in self.method_dic.items()}
+
     def create_dictionary(self, dictionary_path):
         amod_dic = {
             line.split()[0]:m for m, line in enumerate(open(dictionary_path))
@@ -117,18 +133,30 @@ class TorchIntensityWrapper(ModelWrapper):
         amod_dic[''] = amod_dic['X']
         return amod_dic
 
-    def hx(self, tokens):
-        sequence = tokens[:,:-2]
+    def hx(self, linear_input):
+        """
+        Turn list of [seq, energy, charge, method] into model ready tensors
+        """
+        sequence = linear_input[:,:-3]
         intseq = th.tensor(
-            [tokenize_sequence(seq, self.token_dict) for seq in sequence], 
+            [
+                integerize_sequence(seq, self.token_dict)
+                for seq in sequence
+            ], 
             dtype=th.int32, device=device
         )
-        charge = th.tensor(tokens[:,-1].astype(int), dtype=th.int32, device=device)
-        energy = th.tensor(tokens[:,-2].astype(float), dtype=th.float32, device=device)
+        charge = th.tensor(linear_input[:,-3].astype(int), dtype=th.int32, device=device)
+        energy = th.tensor(linear_input[:,-2].astype(float), dtype=th.float32, device=device)
+        method = th.tensor(
+            [self.method_dic[tok] for tok in linear_input[:,-1]], 
+            dtype=th.int32,
+            device=device,
+        )
         return {
             'intseq': intseq,
             'charge': charge,
             'energy': energy,
+            'method': method,
         }
 
     def make_prediction(self, inputs: ndarray) -> ndarray:

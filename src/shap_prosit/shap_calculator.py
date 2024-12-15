@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from typing import Union
+from typing import Union, List
 
 import pandas as pd
 import numpy as np
@@ -15,19 +15,21 @@ class ShapCalculator:
     def __init__(
         self,
         ion: str,
-        dset: NDArray,
-        bgd: NDArray,
+        dset: pd.DataFrame,
+        bgd: pd.DataFrame,
         model_wrapper: ModelWrapper,
         max_sequence_length: int = 30,
         max_charge: int = 6,
+        inputs_ignored: int = 3,
     ):
         self.val = dset
         self.bgd = bgd
         self.max_len = max_sequence_length
         self.max_charge = max_charge
         self.model_wrapper = model_wrapper
+        self.inputs_ignored = inputs_ignored
 
-        self.bgd_sz = bgd.shape[0]
+        self.bgd_size = bgd.shape[0]
 
         self.ext = int(ion[1:].split("+")[0].split('^')[0])
 
@@ -76,19 +78,19 @@ class ShapCalculator:
 
     def ens_pred(self, pep, batsz=1000, mask=True):
         # pep: coalition vectors, 1s and 0s; excludes absent AAs
-        P = pep.shape
+        shape = pep.shape
 
         # Chunk into batches, each <= batsz
         batches = (
-            np.split(pep, np.arange(batsz, batsz * (P[0] // batsz), batsz), 0)
-            if P[0] % batsz == 0
-            else np.split(pep, np.arange(batsz, batsz * (P[0] // batsz) + 1, batsz), 0)
-        )
+            np.split(pep, np.arange(batsz, batsz * (shape[0] // batsz), batsz), 0)
+            if shape[0] % batsz == 0
+            else np.split(pep, np.arange(batsz, batsz * (shape[0] // batsz) + 1, batsz), 0)
+        ) # -> List
 
         # Use these indices to substitute values from background dataset
         # - bgd sample is run for each coalition vector
-        rpts = P[0] // self.bgd_sz + 1  # number of repeats
-        bgd_indices = np.concatenate(rpts * [np.arange(self.bgd_sz, dtype=np.int32)], axis=0)
+        rpts = shape[0] // self.bgd_size + 1  # number of repeats
+        bgd_indices = np.concatenate(rpts * [np.arange(self.bgd_size, dtype=np.int32)], axis=0)
 
         out_ = []
         for I, batch in enumerate(batches):
@@ -97,9 +99,9 @@ class ShapCalculator:
             # [CE, CHARGE]
             batch = np.concatenate(
                 [
-                    batch[:, :-2],
-                    np.ones((batch.shape[0], self.max_len - pep.shape[1] + 2)),
-                    batch[:, -2:],
+                    batch[:, :-self.inputs_ignored],
+                    np.ones((batch.shape[0], self.max_len - shape[1] + self.inputs_ignored)),
+                    batch[:, -self.inputs_ignored:],
                 ],
                 axis=1,
             )
@@ -109,7 +111,7 @@ class ShapCalculator:
             bgd_inds = bgd_indices[I * batsz : (I + 1) * batsz][: batch.shape[0]]
 
             # Create 1/0 mask and then turn into model ready input
-            inp = self.mask_pep(batch, self.inp_orig, bgd_inds, mask)
+            inp = self.mask_pep(batch, self.input_orig, bgd_inds, mask)
 
             # Run through model
             out = self.model_wrapper.make_prediction(inp)
@@ -130,22 +132,24 @@ class ShapCalculator:
 
     def calc_shap_values(self, index, samp=1000):
         # String array
-        inp_orig = self.val[index : index + 1]
-        self.inp_orig = inp_orig
+        input_orig = self.val[index : index+1]
+        self.input_orig = input_orig
 
         # Peptide length for the current peptide
-        pl = sum(inp_orig[0] != "") - 2
-        if pl <= self.ext:
+        num_ignored = self.inputs_ignored
+        peptide_length = sum(input_orig[0, :-num_ignored] != '')
+        shap_vector_length = peptide_length + num_ignored
+        if peptide_length <= self.ext:
             return False
 
         # Input coalition vector: All aa's on (1) + charge + eV
         # - Padded amino acids are added in as all ones (always on) in ens_pred
-        inpvec = np.ones((1, pl + 2))
+        inpvec = np.ones((1, shap_vector_length))
 
         # Mask vector is peptide length all off
-        # - By turning charge and eV on, I am ignoring there contribution
-        maskvec = np.zeros((self.bgd_sz, pl + 2))
-        maskvec[:, -2:] = 1
+        # - By turning the ignored inputs on, I am ignoring there contribution
+        maskvec = np.zeros((self.bgd_size, shap_vector_length))
+        maskvec[:, -num_ignored: ] = 1
 
         orig_spec = self.ens_pred(inpvec, mask=False)
 
@@ -155,27 +159,20 @@ class ShapCalculator:
         ex.expected_value = ex.fnull
 
         # Calculate the SHAP values
-        seq = list(inp_orig.squeeze())
-        seqrep = seq[:pl]
-        # print(seqrep)
+        seq = list(input_orig.squeeze())
+        seqrep = seq[:peptide_length]
         inten = float(orig_spec.squeeze())
-        # print("Calculated intensity: %f"%inten)
-        # print("fnull: %f"%ex.fnull)
-        # print("Expectation value: %f"%ex.expected_value)
         shap_values = ex.shap_values(inpvec, nsamples=samp)
 
-        # for i,j in zip(seq, shap_values.squeeze()[:pl]):
-        # print('%c: %10f'%(i,j))
-        # print(np.sum(shap_values))
-
+        # TODO Find a dynamic way of including arbitrary number non-sequence items
         return {
             "intensity": inten,
-            "shap_values": shap_values.squeeze()[:pl],
+            "shap_values": shap_values.squeeze()[:peptide_length],
             "sequence": seqrep,
+            "charge": int(seq[-3]),
             "energy": float(seq[-2]),
-            "charge": int(seq[-1]),
+            "method": seq[-1],
         }
-
 
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
@@ -184,30 +181,52 @@ def save_shap_values(
     output_path: Union[str, bytes, os.PathLike] = ".",
     perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
     samp: int = 1000,
-    bgd_sz: int = 100,
+    bgd_size: int = 100,
+    inputs_ignored: int = 3,
+    queries: List[str] = None,
 ):
+    print("<<<ATTN>>> Starting calculation loop")
 
+    # Load and query data
+    val_data = pd.read_parquet(val_data_path)
+    original_size = val_data.shape[0]
+    if queries is not None:
+        query_expression = " and ".join(queries)
+        print(f"<<<ATTN>>> Querying dataset of size {original_size} with expression: '{query_expression}'")
+        val_data = val_data.query(query_expression)
+        new_size = val_data.shape[0]
+        print(f"<<<ATTN>>> Dataset now has size {val_data.shape[0]}")
+        if (new_size == original_size) or (new_size == 0):
+            print("<<<ATTN>>> WARNING query didn't do anything, or it did too much")
+    
     # Shuffle validation dataset and split it in background and validation.
-    val_data = np.array([m.split(",") for m in open(val_data_path).read().split("\n")])
     if perm_path is None:
         perm = np.random.permutation(np.arange(len(val_data)))
         np.savetxt(output_path + "/perm.txt", perm, fmt="%d")
     else:
         perm = np.loadtxt(perm_path).astype(int)
-    bgd = val_data[perm[:bgd_sz]]
-    val = val_data[perm[bgd_sz:]]
+    bgd = np.stack(val_data.iloc[perm[:bgd_size]]['full'])
+    val = np.stack(val_data.iloc[perm[bgd_size:]]['full'])
 
-    sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
+    sc = ShapCalculator(
+        ion, 
+        val, 
+        bgd, 
+        model_wrapper=model_wrapper,
+        inputs_ignored=inputs_ignored,
+    )
 
     bgd_pred = model_wrapper.make_prediction(bgd)
     bgd_mean = np.mean(bgd_pred)
-
+    
+    # TODO arbitrary number of non-sequence items
     result = {
         "sequence": [],
         "shap_values": [],
         "intensity": [],
         "energy": [],
         "charge": [],
+        "method": [],
         "bgd_mean": [],
     }
     for INDEX in range(val.shape[0]):
@@ -219,17 +238,26 @@ def save_shap_values(
                     value.append(bgd_mean)
                 else:
                     value.append(out_dict[key])
+        
+        # Dump results every 1000 explanations to be safe
+        if (INDEX+1) // 1000 == 0:
+            pd.DataFrame(result).to_parquet(
+                output_path + "/output.parquet", compression="gzip"
+            )
+    
     pd.DataFrame(result).to_parquet(
-        output_path + "/output.parquet.gzip", compression="gzip"
+        output_path + "/output.parquet", compression="gzip"
     )
 
 
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
-
-    if not os.path.exists(config["ion"]):
-        os.makedirs(config["ion"])
+    
+    output_dir = config["ion"] if config['output_dir'] is None else config['output_dir']
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        os.system(f"cp config.yaml {output_dir}/")
 
     model_wrapper = model_wrappers[config["model_type"]](
         model_path=config["model_path"],
@@ -237,14 +265,17 @@ if __name__ == "__main__":
         token_dict_path=config['token_dict_path'],
         yaml_dir_path=config['yaml_dir_path'],
         ion=config["ion"],
+        method_list=config['method_list'],
     )
 
     save_shap_values(
         val_data_path=config["val_inps_path"],
+        queries=config['queries'],
         model_wrapper=model_wrapper,
         ion=config["ion"],
         perm_path=config["perm_path"],
-        output_path=config["ion"],
+        output_path=output_dir,
         samp=config["samp"],
-        bgd_sz=config["bgd_sz"],
+        bgd_size=config["bgd_sz"],
+        inputs_ignored=config['inputs_ignored'],
     )
