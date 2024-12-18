@@ -5,9 +5,7 @@ from typing import Union
 
 import pandas as pd
 import numpy as np
-import tensorflow as tf
 import yaml
-from dlomix.models import PrositIntensityPredictor
 from numpy.typing import NDArray
 
 import shap
@@ -15,9 +13,6 @@ import shap
 sys.path.append(os.getcwd())
 
 from src.models.model_wrappers import ModelWrapper, model_wrappers
-
-tf.get_logger().setLevel(logging.ERROR)
-
 
 class ShapCalculator:
     def __init__(
@@ -51,43 +46,34 @@ class ShapCalculator:
         self.savepep = []
         self.savecv = []
 
-    @tf.function
     def mask_pep(self, zs, pep, bgd_inds, mask=True):
-        out = tf.zeros((tf.shape(zs)[0], tf.shape(pep)[1]), dtype=tf.string)
+        BS, SL = zs.shape
+        """
+        With out specifying the data type, np.array(SL*['']) is automatically initialized
+        as dtype 'U1'. This array dtype silently truncated strings down to their first
+        character, which was an issue for modified amino acid strings.
+        """
+        out = np.tile(np.array(SL * [''], dtype='U12')[None], [BS, 1])
+        print(f"HI I AM OUT: {out}")
         if mask:
-            ### TF
-            ## Collect all peptide tokens that are 'on' and place them in the out tensor
-            oneinds = tf.where(zs == 1)
-            onetokens = tf.gather_nd(tf.tile(pep, [tf.shape(zs)[0], 1]), oneinds)
-            out = tf.tensor_scatter_nd_update(out, oneinds, onetokens)
-            ## Replace all peptide tokens that are 'off' with background dataset
-            zeroinds = tf.where(zs == 0)
-            # Random permutation of BGD peptides
-            # randperm = tf.random.uniform_candidate_sampler(
-            #    tf.ones((tf.shape(zs)[0], BGD_SZ), dtype=tf.int64),
-            #    num_true=BGD_SZ, num_sampled=tf.shape(zs)[0], unique=True, range_max=BGD_SZ
-            # )[0][:,None]
-            # randperm = tf.random.uniform((tf.shape(zs)[0], 1), 0, BGD_SZ, dtype=tf.int32)
-            bgd_ = tf.gather_nd(self.bgd, bgd_inds[:, None])
-            # gather specific tokens of background dataset that belong to 'off' inds
-            bgd_ = tf.gather_nd(bgd_, zeroinds)
-            # Place the bgd tokens in the out tensor
-            out = tf.tensor_scatter_nd_update(out, zeroinds, tf.reshape(bgd_, (-1,)))
-            # pad c terminus with b''
-            inds2 = tf.cast(tf.argmax(tf.equal(out, b""), 1), tf.int32)
 
-            # nok = tf.where(inds2==0)
-            # amt = tf.shape(nok)[0] #tf.reduce_sum(tf.cast(nok, tf.int32))
-            # inds2 = tf.tensor_scatter_nd_update(
-            #    inds2, nok, tf.shape(pep)[1]*tf.ones((amt,), dtype=tf.int32)
-            # )
-            inds2_ = tf.tile(
-                tf.range(self.max_len, dtype=tf.int32)[None], [tf.shape(out)[0], 1]
-            )
-            inds1000 = tf.where(inds2_ > inds2[:, None])
-            out = tf.tensor_scatter_nd_update(
-                out, inds1000, tf.fill((tf.shape(inds1000)[0],), b"")
-            )
+            ## Collect all peptide tokens that are 'on' and place them in the out tensor
+            oneinds = np.where(zs == 1)
+            if len(oneinds[0]) > 0:
+                out[oneinds] = np.tile(pep, [BS, 1])[oneinds]  # == out[oneinds] = pep[oneinds[1]]
+
+            ## Replace all peptide tokens that are 'off' with background dataset
+            zeroinds = np.where(zs == 0)
+            if len(zeroinds[0]) > 0:
+                bgd_ = self.bgd[bgd_inds]  # background dataset from batch_indices
+                out[zeroinds] = bgd_[zeroinds]
+
+            ## peptide goes from N to C terminus
+            # pad c terminus with b''
+            inds2 = (out == '').argmax(1)
+            blanks = np.tile(np.arange(self.max_len)[None], [BS, 1]) >= inds2[:, None]
+            out[:, :self.max_len][blanks] = ''
+
         else:
             out = pep
 
@@ -109,7 +95,7 @@ class ShapCalculator:
         # Use these indices to substitute values from background dataset
         # - bgd sample is run for each coalition vector
         rpts = P[0] // self.bgd_sz + 1  # number of repeats
-        bgd_indices = tf.concat(rpts * [tf.range(self.bgd_sz, dtype=tf.int32)], 0)
+        bgd_indices = np.concatenate(rpts * [np.arange(self.bgd_sz, dtype=np.int32)], axis=0)
 
         out_ = []
         for I, batch in enumerate(batches):
@@ -119,31 +105,31 @@ class ShapCalculator:
             batch = np.concatenate(
                 [
                     batch[:, :-2],
-                    np.ones((tf.shape(batch)[0], self.max_len - tf.shape(pep)[1] + 2)),
+                    np.ones((batch.shape[0], self.max_len - pep.shape[1] + 2)),
                     batch[:, -2:],
                 ],
                 axis=1,
             )
-            batch = tf.constant(batch, tf.int32)
+            #batch = th.tensor(batch, dtype=th.int32, device=device)
 
             # Indices of background dataset to use for subbing in 0s
-            bgd_inds = bgd_indices[I * batsz : (I + 1) * batsz][: tf.shape(batch)[0]]
+            bgd_inds = bgd_indices[I * batsz : (I + 1) * batsz][: batch.shape[0]]
 
             # Create 1/0 mask and then turn into model ready input
             inp = self.mask_pep(batch, self.inp_orig, bgd_inds, mask)
 
             # Run through model
-            out = self.model_wrapper.make_prediction(inp.numpy())
+            out = self.model_wrapper.make_prediction(inp)
             out_.append(out)
 
-        out_ = tf.concat(out_, axis=0)
+        out_ = np.concatenate(out_, axis=0)
 
         return out_
 
     def score(self, peptide, mask=True):
-        shape = tf.shape(peptide)
+        shape = peptide.shape
         x_ = self.ens_pred(peptide, mask=mask)
-        score = tf.squeeze(x_).numpy()
+        score = x_.squeeze()
         if shape[0] == 1:
             score = np.array([score])[None, :]
 
@@ -180,7 +166,7 @@ class ShapCalculator:
         seqrep = seq[:pl]
         # print(seqrep)
 
-        inten = float(orig_spec.numpy().squeeze())
+        inten = float(orig_spec.squeeze())
 
         # print("Calculated intensity: %f"%inten)
         # print("fnull: %f"%ex.fnull)
@@ -234,7 +220,7 @@ def save_shap_values(
         "bgd_mean": [],
     }
     # PUT IT BACK AFTER USAGE
-    # for INDEX in range(100):
+    #for INDEX in range(1000):
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         out_dict = sc.calc_shap_values(INDEX, samp=samp)
