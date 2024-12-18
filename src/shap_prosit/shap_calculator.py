@@ -54,7 +54,6 @@ class ShapCalculator:
         character, which was an issue for modified amino acid strings.
         """
         out = np.tile(np.array(SL * [''], dtype='U12')[None], [BS, 1])
-        print(f"HI I AM OUT: {out}")
         if mask:
 
             ## Collect all peptide tokens that are 'on' and place them in the out tensor
@@ -220,8 +219,8 @@ def save_shap_values(
         "bgd_mean": [],
     }
     # PUT IT BACK AFTER USAGE
-    #for INDEX in range(1000):
-    for INDEX in range(val.shape[0]):
+    for INDEX in range(1000):
+    #for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         out_dict = sc.calc_shap_values(INDEX, samp=samp)
         if out_dict != False:
