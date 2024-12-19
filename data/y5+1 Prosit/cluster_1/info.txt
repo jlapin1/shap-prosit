@@ -1,1 +1,0 @@
-Length of the cluster: 864, Cluster mean intensity: 0.7890716945511047
