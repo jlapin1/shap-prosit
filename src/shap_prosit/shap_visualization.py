@@ -108,8 +108,14 @@ class ShapVisualization:
                 # Store values for token in list
                 self.amino_acid_pos[tok_c].append(sh_value)
                 self.amino_acid_pos_inten[tok_c].append(inten)
-
+        
+        # This includes all tokens
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
+        # This excludes modification-only tokens (N-term)
+        self.amino_acids_sorted_ = np.array([
+            m for m in self.amino_acids_sorted 
+            if (m[0]!='[' or m[-1]!=']')
+        ])
 
         self.sv_avg = self.sv_sum / (self.count_positions + 1e-9)
         self.sv_avg *= self.count_positions > MIN_OCCUR_AVG
@@ -349,13 +355,18 @@ class ShapVisualization:
         else:
             plt.show()
 
-    def position_heatmap(self, save=False):
+    def position_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
-        heatmap_int = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap = np.zeros((len(self.amino_acids_sorted), 30))
-        heatmap_abs = np.zeros((len(self.amino_acids_sorted), 30))
+        
+        amino_acids = (
+            self.amino_acids_sorted if all_tokens else self.amino_acids_sorted_
+        )
 
-        for A, a in enumerate(self.amino_acids_sorted):
+        heatmap_int = np.zeros((len(amino_acids), 30))
+        heatmap = np.zeros((len(amino_acids), 30))
+        heatmap_abs = np.zeros((len(amino_acids), 30))
+        
+        for A, a in enumerate(amino_acids):
             for b in np.arange(30):
                 tok = "%s_%d" % (a, -1 * (b + 1 - ion_extent(self.ion)))
                 if tok in self.amino_acid_pos_mean_inten:
@@ -383,8 +394,8 @@ class ShapVisualization:
             ax.axvline(
                 x=ion_extent(self.ion) - 0.5, color="black", linewidth=3
             )
-            ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
-            ax.set_yticklabels(self.amino_acids_sorted, size=6)
+            ax.set_yticks(np.arange(len(amino_acids)))
+            ax.set_yticklabels(amino_acids, size=6)
             ax.set_xticks(np.arange(30))
             ax.set_xticklabels(tick_range, size=6)
         fig.colorbar(im).ax.set_yscale("linear")
@@ -395,32 +406,37 @@ class ShapVisualization:
         else:
             plt.show()
 
-    def aa_heatmap(self, save=False):
+    def aa_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
+        
+        amino_acids = (
+            self.amino_acids_sorted if all_tokens else self.amino_acids_sorted_
+        )
+
         fig, axes = plt.subplots(3, len(self.position_combos))
         fig.set_figheight(15)
         fig.set_figwidth(17)
 
         for ax in axes.flatten():
-            ax.set_yticks(np.arange(len(self.amino_acids_sorted)))
-            ax.set_yticklabels(self.amino_acids_sorted, size=6)
+            ax.set_yticks(np.arange(len(amino_acids)))
+            ax.set_yticklabels(amino_acids, size=6)
             ax.set_ylabel("AA(L)")
-            ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
-            ax.set_xticklabels(self.amino_acids_sorted, size=6)
+            ax.set_xticks(np.arange(len(amino_acids)))
+            ax.set_xticklabels(amino_acids, size=6)
             ax.set_xlabel("AA(R)")
 
         for i, combo in enumerate(self.position_combos):
             heatmap = np.zeros(
-                (len(self.amino_acids_sorted), len(self.amino_acids_sorted))
+                (len(amino_acids), len(amino_acids))
             )
             heatmap_abs = np.zeros(
-                (len(self.amino_acids_sorted), len(self.amino_acids_sorted))
+                (len(amino_acids), len(amino_acids))
             )
             heatmap_int = np.zeros(
-                (len(self.amino_acids_sorted), len(self.amino_acids_sorted))
+                (len(amino_acids), len(amino_acids))
             )
-            for l, aa1 in enumerate(self.amino_acids_sorted):
-                for m, aa2 in enumerate(self.amino_acids_sorted):
+            for l, aa1 in enumerate(amino_acids):
+                for m, aa2 in enumerate(amino_acids):
                     tok = "%s-%s" % (aa1, aa2)
                     if tok in self.combo_pos_sv_sum[i]:
                         if len(self.combo_pos_sv_sum[i][tok]) > MIN_OCCUR_HEAT:
@@ -461,7 +477,7 @@ class ShapVisualization:
 
         plot = sns.stripplot(
             data=data,
-            order=self.amino_acids_sorted,
+            order=self.amino_acids_sorted_,
             x="shap_value",
             y="amino_acid",
             size=2,
