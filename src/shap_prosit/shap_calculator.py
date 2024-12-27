@@ -10,11 +10,11 @@ from numpy.typing import NDArray
 import shap
 sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
-#TODO get rid of torch from this module
+
 class ShapCalculator:
     def __init__(
         self,
-        ion: str,
+        mode: str,
         dset: NDArray,
         bgd: NDArray,
         model_wrapper: ModelWrapper,
@@ -29,7 +29,11 @@ class ShapCalculator:
 
         self.bgd_sz = bgd.shape[0]
 
-        self.ext = int(ion[1:].split("+")[0].split('^')[0])
+        if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+            self.ext = 0
+        else:
+            self.ext = int(mode[1:].split("+")[0].split('^')[0])
+        self.mode = mode
 
         self.fnull = np.array(
             [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
@@ -158,15 +162,10 @@ class ShapCalculator:
         seq = list(inp_orig.squeeze())
         seqrep = seq[:pl]
         # print(seqrep)
-        inten = float(orig_spec.squeeze())
-        # print("Calculated intensity: %f"%inten)
-        # print("fnull: %f"%ex.fnull)
-        # print("Expectation value: %f"%ex.expected_value)
-        shap_values = ex.shap_values(inpvec, nsamples=samp)
 
-        # for i,j in zip(seq, shap_values.squeeze()[:pl]):
-        # print('%c: %10f'%(i,j))
-        # print(np.sum(shap_values))
+        inten = float(orig_spec.squeeze())
+
+        shap_values = ex.shap_values(inpvec, nsamples=samp)
 
         return {
             "intensity": inten,
@@ -180,7 +179,7 @@ class ShapCalculator:
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
     model_wrapper: ModelWrapper,
-    ion: str,
+    mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
     samp: int = 1000,
@@ -197,7 +196,7 @@ def save_shap_values(
     bgd = val_data[perm[:bgd_sz]]
     val = val_data[perm[bgd_sz:]]
 
-    sc = ShapCalculator(ion, val, bgd, model_wrapper=model_wrapper)
+    sc = ShapCalculator(mode, val, bgd, model_wrapper=model_wrapper)
 
     bgd_pred = model_wrapper.make_prediction(bgd)
     bgd_mean = np.mean(bgd_pred)
@@ -210,6 +209,8 @@ def save_shap_values(
         "charge": [],
         "bgd_mean": [],
     }
+    # PUT IT BACK AFTER USAGE
+    #for INDEX in range(1000):
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         sequence = sc.val[INDEX : INDEX + 1]
@@ -229,8 +230,8 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
 
-    if not os.path.exists(config["ion"]):
-        os.makedirs(config["ion"])
+    if not os.path.exists(config["mode"]):
+        os.makedirs(config["mode"])
 
     model_wrapper = model_wrappers[config["model_type"]](
         model_path=config["model_path"],
@@ -243,9 +244,9 @@ if __name__ == "__main__":
     save_shap_values(
         val_data_path=config["val_inps_path"],
         model_wrapper=model_wrapper,
-        ion=config["ion"],
+        mode=config["mode"],
         perm_path=config["perm_path"],
-        output_path=config["ion"],
+        output_path=config["mode"],
         samp=config["samp"],
         bgd_sz=config["bgd_sz"],
     )

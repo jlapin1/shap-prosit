@@ -1,7 +1,7 @@
 shap_calculator:
   # SHAP calculation settings
   val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/uvpd_shap_input.csv"
-  ion: x5
+  mode: x5
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
@@ -14,7 +14,7 @@ shap_calculator:
   yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-11-30_05-33-17/yaml"
   
 shap_visualization:
-  ion: Z5
+  mode: Z5
   sv_path: "data/ecd/ecd_241115/Z5/output.parquet.gzip"
   clustering:
     run: False
