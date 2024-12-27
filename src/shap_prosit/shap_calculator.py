@@ -128,9 +128,9 @@ class ShapCalculator:
 
         return score
 
-    def calc_shap_values(self, index, samp=1000):
+    def calc_shap_values(self, sequence, samp=1000):
         # String array
-        inp_orig = self.val[index : index + 1]
+        inp_orig = sequence
         self.inp_orig = inp_orig
 
         # Peptide length for the current peptide
@@ -212,7 +212,8 @@ def save_shap_values(
     }
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
-        out_dict = sc.calc_shap_values(INDEX, samp=samp)
+        sequence = sc.val[INDEX : INDEX + 1]
+        out_dict = sc.calc_shap_values(sequence, samp=samp)
         if out_dict != False:
             for key, value in result.items():
                 if key == "bgd_mean":
