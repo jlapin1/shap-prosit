@@ -1,8 +1,8 @@
 shap_calculator:
   # SHAP calculation settings
-  output_dir: UVPD_A5
-  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/uvpd_shap_input.csv"
-  mode: x5
+  output_dir: UVPD_b5
+  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
+  mode: b5
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
@@ -19,8 +19,9 @@ shap_calculator:
   method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
   
 shap_visualization:
-  mode: Z5
-  sv_path: "data/ecd/ecd_241115/Z5/output.parquet.gzip"
+  mode: b5
+  sv_path: "UVPD_b5/output.parquet"
+  filter_expr:
   clustering:
     run: False
     from_which_end: right

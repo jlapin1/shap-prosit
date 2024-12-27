@@ -14,15 +14,9 @@ from src.models.model_wrappers import ModelWrapper, model_wrappers
 class ShapCalculator:
     def __init__(
         self,
-<<<<<<< HEAD
-        ion: str,
+        mode: str,
         dset: pd.DataFrame,
         bgd: pd.DataFrame,
-=======
-        mode: str,
-        dset: NDArray,
-        bgd: NDArray,
->>>>>>> torch
         model_wrapper: ModelWrapper,
         max_sequence_length: int = 30,
         max_charge: int = 6,
@@ -142,13 +136,8 @@ class ShapCalculator:
 
     def calc_shap_values(self, sequence, samp=1000):
         # String array
-<<<<<<< HEAD
-        input_orig = self.val[index : index+1]
+        input_orig = sequence
         self.input_orig = input_orig
-=======
-        inp_orig = sequence
-        self.inp_orig = inp_orig
->>>>>>> torch
 
         # Peptide length for the current peptide
         num_ignored = self.inputs_ignored
@@ -174,23 +163,13 @@ class ShapCalculator:
         ex.expected_value = ex.fnull
 
         # Calculate the SHAP values
-<<<<<<< HEAD
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
         inten = float(orig_spec.squeeze())
         shap_values = ex.shap_values(inpvec, nsamples=samp)
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
-=======
-        seq = list(inp_orig.squeeze())
-        seqrep = seq[:pl]
-        # print(seqrep)
 
-        inten = float(orig_spec.squeeze())
-
-        shap_values = ex.shap_values(inpvec, nsamples=samp)
-
->>>>>>> torch
         return {
             "intensity": inten,
             "shap_values": shap_values.squeeze()[:peptide_length],
