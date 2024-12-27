@@ -10,13 +10,19 @@ from numpy.typing import NDArray
 import shap
 sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
-#TODO get rid of torch from this module
+
 class ShapCalculator:
     def __init__(
         self,
+<<<<<<< HEAD
         ion: str,
         dset: pd.DataFrame,
         bgd: pd.DataFrame,
+=======
+        mode: str,
+        dset: NDArray,
+        bgd: NDArray,
+>>>>>>> torch
         model_wrapper: ModelWrapper,
         max_sequence_length: int = 30,
         max_charge: int = 6,
@@ -31,7 +37,11 @@ class ShapCalculator:
 
         self.bgd_size = bgd.shape[0]
 
-        self.ext = int(ion[1:].split("+")[0].split('^')[0])
+        if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+            self.ext = 0
+        else:
+            self.ext = int(mode[1:].split("+")[0].split('^')[0])
+        self.mode = mode
 
         self.fnull = np.array(
             [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
@@ -130,10 +140,15 @@ class ShapCalculator:
 
         return score
 
-    def calc_shap_values(self, index, samp=1000):
+    def calc_shap_values(self, sequence, samp=1000):
         # String array
+<<<<<<< HEAD
         input_orig = self.val[index : index+1]
         self.input_orig = input_orig
+=======
+        inp_orig = sequence
+        self.inp_orig = inp_orig
+>>>>>>> torch
 
         # Peptide length for the current peptide
         num_ignored = self.inputs_ignored
@@ -159,12 +174,23 @@ class ShapCalculator:
         ex.expected_value = ex.fnull
 
         # Calculate the SHAP values
+<<<<<<< HEAD
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
         inten = float(orig_spec.squeeze())
         shap_values = ex.shap_values(inpvec, nsamples=samp)
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
+=======
+        seq = list(inp_orig.squeeze())
+        seqrep = seq[:pl]
+        # print(seqrep)
+
+        inten = float(orig_spec.squeeze())
+
+        shap_values = ex.shap_values(inpvec, nsamples=samp)
+
+>>>>>>> torch
         return {
             "intensity": inten,
             "shap_values": shap_values.squeeze()[:peptide_length],
@@ -177,7 +203,7 @@ class ShapCalculator:
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
     model_wrapper: ModelWrapper,
-    ion: str,
+    mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
     samp: int = 1000,
@@ -209,7 +235,7 @@ def save_shap_values(
     val = np.stack(val_data.iloc[perm[bgd_size:]]['full'])
 
     sc = ShapCalculator(
-        ion, 
+        mode, 
         val, 
         bgd, 
         model_wrapper=model_wrapper,
@@ -229,9 +255,12 @@ def save_shap_values(
         "method": [],
         "bgd_mean": [],
     }
+    # PUT IT BACK AFTER USAGE
+    #for INDEX in range(1000):
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
-        out_dict = sc.calc_shap_values(INDEX, samp=samp)
+        sequence = sc.val[INDEX : INDEX + 1]
+        out_dict = sc.calc_shap_values(sequence, samp=samp)
         if out_dict != False:
             for key, value in result.items():
                 if key == "bgd_mean":
@@ -254,7 +283,7 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
     
-    output_dir = config["ion"] if config['output_dir'] is None else config['output_dir']
+    output_dir = config["mode"] if config['output_dir'] is None else config['output_dir']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         os.system(f"cp config.yaml {output_dir}/")
@@ -264,7 +293,7 @@ if __name__ == "__main__":
         ion_dict_path=config['ion_dict_path'],
         token_dict_path=config['token_dict_path'],
         yaml_dir_path=config['yaml_dir_path'],
-        ion=config["ion"],
+        ion=config["mode"],
         method_list=config['method_list'],
     )
 
@@ -272,7 +301,7 @@ if __name__ == "__main__":
         val_data_path=config["val_inps_path"],
         queries=config['queries'],
         model_wrapper=model_wrapper,
-        ion=config["ion"],
+        mode=config["mode"],
         perm_path=config["perm_path"],
         output_path=output_dir,
         samp=config["samp"],

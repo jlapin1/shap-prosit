@@ -13,16 +13,27 @@ import os
 from abc import ABC, abstractmethod
 from time import sleep
 from typing import Union
+import warnings
 
 #from koinapy import Koina
 import pandas as pd
 import numpy as np
-import torch as th
+
 import yaml
 from . import PeptideEncoder
 from numpy import ndarray
 
+import torch as th
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
+
+"""
+from . import TransformerModel
+from .ChargeState import custom_keras_utils as cutils
+from .ChargeState.chargestate import ChargeStateDistributionPredictor
+from .ChargeState.dlomix_preprocessing import to_dlomix
+import keras
+import tensorflow as tf
+"""
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -60,7 +71,7 @@ def integerize_sequence(seq, dictionary):
 
 class ModelWrapper(ABC):
     @abstractmethod
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
         """Initialize model wrapper by loading the model."""
         pass
 
@@ -70,10 +81,9 @@ class ModelWrapper(ABC):
         sequences, precursor charges and collision energy."""
         pass
 
-"""
 class PrositIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
-        self.ion_ind = annotations()[ion]
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+        self.ion_ind = annotations()[mode]
         self.model = PrositIntensityPredictor(seq_length=30)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
@@ -83,8 +93,8 @@ class PrositIntensityWrapper(ModelWrapper):
 
 
 class TransformerIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
-        self.ion_ind = annotations()[ion]
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+        self.ion_ind = annotations()[mode]
         with open(os.path.join(path, "model.yaml"), encoding="utf-8") as file:
             model_config = yaml.safe_load(file)
         self.model = TransformerModel(**model_config)
@@ -93,7 +103,6 @@ class TransformerIntensityWrapper(ModelWrapper):
     
     def make_prediction(self, inputs: ndarray) -> ndarray:
         return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
-"""
 
 class TorchIntensityWrapper(ModelWrapper):
     def __init__(self, 
@@ -167,67 +176,157 @@ class TorchIntensityWrapper(ModelWrapper):
         return prediction
 
 class KoinaWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], ion: str) -> None:
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
         self.model = Koina(path)
-        self.ion = ion
+        self.mode = mode
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
-        sequences = []
-        for i in inputs[:, :-2]:
-            try:
-                seq = "".join(i)
-            except:
-                seq = b"".join(i).decode("utf-8")
-            sequences.append(seq)
-        input_dict = {
-            "peptide_sequences": np.array(sequences),
-            "precursor_charges": inputs[:, -1].astype("int"),
-            "collision_energies": (inputs[:, -2].astype("float") * 100).astype("int"),
-        }
-        counter = 0
-        success = False
-        while counter < 5 and not success:
-            try:
-                preds = self.model.predict(
-                    pd.DataFrame(input_dict), min_intensity=-0.00001
-                )
-            except:
-                print(input_dict)
-                counter += 1
-                sleep(1)
-            else:
-                success = True
-        if counter >= 5:
-            return np.zeros(len(inputs))
-        if len(
-            preds[preds["annotation"] == bytes(self.ion, "utf-8")]["intensities"]
-        ) < len(sequences):
-            print(preds)
-            results = []
-            for i in range(len(sequences)):
-                if (
-                    i
-                    not in preds[preds["annotation"] == bytes(self.ion, "utf-8")][
-                        "intensities"
-                    ].index
-                ):
-                    results.append(0.0)
-                else:
-                    results.append(
-                        preds[preds["annotation"] == bytes(self.ion, "utf-8")][
-                            "intensities"
-                        ][i]
-                    )
+        # set mode = "rt" to enter retention time mode
+        # inputs["sequences"] = [["W", "E"],[],[]]
+        if self.mode == "rt":
+
+            print(type(hx(inputs)["sequence"][0]))
+
+            sequences = []
+            for seq in hx(inputs)["sequence"]:
+                try:
+                    sequence = "".join(seq)
+                except:
+                    sequence = b"".join(seq).decode("utf-8")
+                sequences.append(sequence)
+
+            input_df = pd.DataFrame()
+            input_df["peptide_sequences"] = np.array(sequences)
+
+            return (self.model.predict(input_df)["irt"]).to_numpy()
+
+        elif self.mode == "cc":
+            # set mode = "cc" to enter retention time mode
+            sequences = []
+            for seq in hx(inputs)["sequence"]:
+                try:
+                    sequence = "".join(seq)
+                except:
+                    sequence = b"".join(seq).decode("utf-8")
+                sequences.append(sequence)
+
+            input_df = pd.DataFrame()
+            input_df["peptide_sequences"] = np.array(sequences)
+            input_df["precursor_charges"] = inputs[:, -1].astype("int")
+            print(input_df["peptide_sequences"])
+            print(input_df["precursor_charges"])
+            assert len(input_df.shape) == 2, f"shape is not 2-dimensional\n{input_df}"
+            return (self.model.predict(input_df)["ccs"]).to_numpy()
+
         else:
-            results = preds[preds["annotation"] == bytes(self.ion, "utf-8")][
-                "intensities"
-            ].to_numpy()
-        return np.array(results)
+            sequences = []
+            for i in inputs[:, :-2]:
+                try:
+                    seq = "".join(i)
+                except:
+                    seq = b"".join(i).decode("utf-8")
+                sequences.append(seq)
+            input_dict = {
+                "peptide_sequences": np.array(sequences),
+                "precursor_charges": inputs[:, -1].astype("int"),
+                "collision_energies": (inputs[:, -2].astype("float") * 100).astype(
+                    "int"
+                ),
+            }
+            counter = 0
+            success = False
+            while counter < 5 and not success:
+                try:
+                    preds = self.model.predict(
+                        pd.DataFrame(input_dict), min_intensity=-0.00001
+                    )
+                except:
+                    print(input_dict)
+                    counter += 1
+                    sleep(1)
+                else:
+                    success = True
+            if counter >= 5:
+                return np.zeros(len(inputs))
+            if len(
+                preds[preds["annotation"] == bytes(self.mode, "utf-8")]["intensities"]
+            ) < len(sequences):
+                print(preds)
+                results = []
+                for i in range(len(sequences)):
+                    if (
+                        i
+                        not in preds[preds["annotation"] == bytes(self.mode, "utf-8")][
+                            "intensities"
+                        ].index
+                    ):
+                        results.append(0.0)
+                    else:
+                        results.append(
+                            preds[preds["annotation"] == bytes(self.mode, "utf-8")][
+                                "intensities"
+                            ][i]
+                        )
+            else:
+                results = preds[preds["annotation"] == bytes(self.mode, "utf-8")][
+                    "intensities"
+                ].to_numpy()
+            return np.array(results)
+
+
+class ChargeStateWrapper(ModelWrapper):
+    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+        import ChargeState
+
+        self.path = "./src/models/ChargeState/trained_model.keras"
+        if path:
+            warnings.warn(
+                """
+                            You have given a path even though this project provides a model already.
+                            If provided a .keras model in the same form as the provided model,
+                            the code might still work. Otherwise, stick with provided model or modify this code section.
+                            """
+            )
+            self.path = path
+        self.mode = mode[-1]
+
+        self.model = keras.saving.load_model(
+            self.path,
+            custom_objects={
+                "upscaled_mean_squared_error": cutils.upscaled_mean_squared_error,
+                "euclidean_similarity": cutils.euclidean_similarity,
+                "masked_pearson_correlation_distance": cutils.masked_pearson_correlation_distance,
+                "masked_spectral_distance": cutils.masked_spectral_distance,
+                "ChargeStateDistributionPredictor": ChargeStateDistributionPredictor,
+            },
+        )
+
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+
+        # inputs["sequences"] = [["W", "E"],[],[]]
+
+        # print(type(hx(inputs)["sequence"][0]))
+
+        sequences = []
+        for seq in hx(inputs)["sequence"]:
+            try:
+                sequence = "".join(seq)
+            except:
+                sequence = b"".join(seq).decode("utf-8")
+            sequences.append(sequence)
+
+        input_df = pd.DataFrame()
+        input_df["peptide_sequences"] = np.array(sequences)
+
+        encoded_seqs, _ = to_dlomix(input_df)
+
+        return self.model.predict(encoded_seqs)[:, int(self.mode) - 1]
 
 
 model_wrappers = {
-    #"prosit": PrositIntensityWrapper,
-    #"transformer": TransformerIntensityWrapper,
+    "prosit": PrositIntensityWrapper,
+    "transformer": TransformerIntensityWrapper,
     "torch": TorchIntensityWrapper,
-    #"koina": KoinaWrapper,
+    "koina": KoinaWrapper,
+    "charge": ChargeStateWrapper,
 }
