@@ -15,25 +15,25 @@ from time import sleep
 from typing import Union
 import warnings
 
-#from koinapy import Koina
 import pandas as pd
 import numpy as np
+import re
 
 import yaml
-from . import PeptideEncoder
 from numpy import ndarray
 
-import torch as th
-device = th.device("cuda" if th.cuda.is_available() else "cpu")
+from koinapy import Koina
 
-"""
-from . import TransformerModel
+#from . import PeptideEncoder
+#import torch as th
+#device = th.device("cuda" if th.cuda.is_available() else "cpu")
+
+#from . import TransformerModel
 from .ChargeState import custom_keras_utils as cutils
 from .ChargeState.chargestate import ChargeStateDistributionPredictor
 from .ChargeState.dlomix_preprocessing import to_dlomix
 import keras
 import tensorflow as tf
-"""
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -82,10 +82,14 @@ class ModelWrapper(ABC):
         pass
 
 class PrositIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+    def __init__(
+        self, model_path: Union[str, bytes, os.PathLike], 
+        mode: str
+    ) -> None:
+
         self.ion_ind = annotations()[mode]
         self.model = PrositIntensityPredictor(seq_length=30)
-        latest_checkpoint = tf.train.latest_checkpoint(path)
+        latest_checkpoint = tf.train.latest_checkpoint(model_path)
         self.model.load_weights(latest_checkpoint)
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
@@ -93,9 +97,14 @@ class PrositIntensityWrapper(ModelWrapper):
 
 
 class TransformerIntensityWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+    def __init__(
+        self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        mode: str
+    ) -> None:
+        
         self.ion_ind = annotations()[mode]
-        with open(os.path.join(path, "model.yaml"), encoding="utf-8") as file:
+        with open(os.path.join(model_path, "model.yaml"), encoding="utf-8") as file:
             model_config = yaml.safe_load(file)
         self.model = TransformerModel(**model_config)
         latest_checkpoint = tf.train.latest_checkpoint(path)
@@ -110,11 +119,12 @@ class TorchIntensityWrapper(ModelWrapper):
         ion_dict_path: Union[str, bytes, os.PathLike],
         token_dict_path: Union[str, bytes, os.PathLike],
         yaml_dir_path: Union[str, bytes, os.PathLike],
-        ion: str,
+        mode: str,
         method_list: list,
     ) -> None:
+
         ion_dict = pd.read_csv(ion_dict_path, index_col='full')
-        self.ion_ind = ion_dict.loc[ion]['index']
+        self.ion_ind = ion_dict.loc[mode]['index']
         with open(os.path.join(yaml_dir_path, "model.yaml")) as f: model_config = yaml.safe_load(f)
         with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: load_config = yaml.safe_load(f)
         num_tokens = len(open(token_dict_path).read().strip().split("\n")) + 1
@@ -176,9 +186,17 @@ class TorchIntensityWrapper(ModelWrapper):
         return prediction
 
 class KoinaWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
-        self.model = Koina(path)
+    def __init__(
+        self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        mode: str,
+        inputs_ignored: int=3,
+        **kwargs
+    ) -> None:
+
+        self.model = Koina(model_path)
         self.mode = mode
+        self.inputs_ignored = inputs_ignored
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
         # set mode = "rt" to enter retention time mode
@@ -220,16 +238,23 @@ class KoinaWrapper(ModelWrapper):
 
         else:
             sequences = []
-            for i in inputs[:, :-2]:
+            for i in inputs[:, :-self.inputs_ignored]:
                 try:
-                    seq = "".join(i)
+                    sequence = "".join(i)
                 except:
-                    seq = b"".join(i).decode("utf-8")
-                sequences.append(seq)
+                    sequence = b"".join(i).decode("utf-8")
+                # FIXME If sequence contains mods that prosit can't handle, remove the input
+                # instance
+                sequence = re.sub('\[UNIMOD:4]', '', sequence)
+                sequence = re.sub('\[UNIMOD:1]', '', sequence)
+                sequences.append(sequence)
+            # FIXME This always assumes charge is third to last and collision energy second
+            # to last (method is last). Need a dynamic way of finding these two features'
+            # positions.
             input_dict = {
                 "peptide_sequences": np.array(sequences),
-                "precursor_charges": inputs[:, -1].astype("int"),
-                "collision_energies": (inputs[:, -2].astype("float") * 100).astype(
+                "precursor_charges": inputs[:, -3].astype("int"),
+                "collision_energies": (inputs[:, -2].astype("float")).astype(
                     "int"
                 ),
             }
@@ -275,7 +300,12 @@ class KoinaWrapper(ModelWrapper):
 
 
 class ChargeStateWrapper(ModelWrapper):
-    def __init__(self, path: Union[str, bytes, os.PathLike], mode: str) -> None:
+    def __init__(
+        self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        mode: str
+    ) -> None:
+
         import ChargeState
 
         self.path = "./src/models/ChargeState/trained_model.keras"
@@ -287,7 +317,7 @@ class ChargeStateWrapper(ModelWrapper):
                             the code might still work. Otherwise, stick with provided model or modify this code section.
                             """
             )
-            self.path = path
+            self.path = model_path
         self.mode = mode[-1]
 
         self.model = keras.saving.load_model(

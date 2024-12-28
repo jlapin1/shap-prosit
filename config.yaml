@@ -1,25 +1,25 @@
 shap_calculator:
   # SHAP calculation settings
   output_dir: UVPD_b5
-  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
-  mode: b5
+  val_inps_path: "./val_inps.parquet"
+  mode: b5+1
   perm_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
   inputs_ignored: 3
   queries:
-    - "method == 'UVPD'"
+    - "method == 'HCD'"
   
   # Reconstituting a saved torch model
-  model_type: torch
-  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569"
+  model_type: koina
+  model_path: "Prosit_2019_intensity" #"/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569"
   ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/filtered_ion_dict.csv"
   token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
   yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/yaml"
   method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
   
 shap_visualization:
-  mode: b5
+  mode: b5+1
   sv_path: "UVPD_b5/output.parquet"
   filter_expr:
   clustering:

@@ -248,7 +248,7 @@ def save_shap_values(
                     value.append(out_dict[key])
         
         # Dump results every 1000 explanations to be safe
-        if (INDEX+1) // 1000 == 0:
+        if (INDEX+1) % 100 == 0:
             pd.DataFrame(result).to_parquet(
                 output_path + "/output.parquet", compression="gzip"
             )
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         ion_dict_path=config['ion_dict_path'],
         token_dict_path=config['token_dict_path'],
         yaml_dir_path=config['yaml_dir_path'],
-        ion=config["mode"],
+        mode=config["mode"],
         method_list=config['method_list'],
     )
 
