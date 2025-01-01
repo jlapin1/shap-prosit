@@ -31,15 +31,13 @@ class ShapCalculator:
 
         self.bgd_size = bgd.shape[0]
 
-        if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+        if mode in ["rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
             self.ext = 0
         else:
-            self.ext = int(mode[1:].split("+")[0].split('^')[0])
+            self.ext = {ion: int(ion[1:].split("+")[0].split('^')[0]) for ion in mode}
         self.mode = mode
 
-        self.fnull = np.array(
-            [self.model_wrapper.make_prediction(bgd).squeeze().mean()]
-        )
+        self.fnull = self.model_wrapper.make_prediction(bgd).squeeze().mean(0)
 
         self.savepep = []
         self.savecv = []
@@ -128,9 +126,9 @@ class ShapCalculator:
     def score(self, peptide, mask=True):
         shape = peptide.shape
         x_ = self.ens_pred(peptide, mask=mask)
-        score = x_.squeeze()
-        if shape[0] == 1:
-            score = np.array([score])[None, :]
+        score = x_
+        #if shape[0] == 1:
+        #    score = np.array([score])[None, :]
 
         return score
 
@@ -143,8 +141,6 @@ class ShapCalculator:
         num_ignored = self.inputs_ignored
         peptide_length = sum(input_orig[0, :-num_ignored] != '')
         shap_vector_length = peptide_length + num_ignored
-        if peptide_length <= self.ext:
-            return False
 
         # Input coalition vector: All aa's on (1) + charge + eV
         # - Padded amino acids are added in as all ones (always on) in ens_pred
@@ -155,24 +151,27 @@ class ShapCalculator:
         maskvec = np.zeros((self.bgd_size, shap_vector_length))
         maskvec[:, -num_ignored: ] = 1
 
-        orig_spec = self.ens_pred(inpvec, mask=False)
-
         # SHAP Explainer
-        ex = shap.KernelExplainer(self.score, maskvec)
+        ex = shap.KernelExplainer(self.score, maskvec)#, keep_index=True)
         ex.fnull = self.fnull
         ex.expected_value = ex.fnull
 
         # Calculate the SHAP values
+        shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
+        
+        # Other outputs to save
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
-        inten = float(orig_spec.squeeze())
-        shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
+        original_intensity = self.ens_pred(inpvec, mask=False).squeeze()
+        too_short = peptide_length <= np.array(list(self.ext.values()))
+        # Identify impossible sequences by setting intensity to -1
+        original_intensity[too_short] = -1
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
 
         return {
-            "intensity": inten,
-            "shap_values": shap_values.squeeze()[:peptide_length],
+            "intensity": pd.Series(original_intensity, index=self.mode),
+            "shap_values": pd.DataFrame(shap_values.squeeze()[:peptide_length], columns=self.mode),
             "sequence": seqrep,
             "charge": int(seq[-3]),
             "energy": float(seq[-2]),
@@ -184,19 +183,20 @@ def save_shap_values(
     model_wrapper: ModelWrapper,
     mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
-    perm_path: Union[str, bytes, os.PathLike] = "perm.txt",
+    bgd_loc_path: Union[str, bytes, os.PathLike] = None,
     samp: int = 1000,
     bgd_size: int = 100,
     inputs_ignored: int = 3,
-    queries: List[str] = None,
+    dataset_queries: List[str] = None,
+    bgd_queries: List[str] = None,
 ):
     print("<<<ATTN>>> Starting calculation loop")
 
     # Load and query data
     val_data = pd.read_parquet(val_data_path)
     original_size = val_data.shape[0]
-    if queries is not None:
-        query_expression = " and ".join(queries)
+    if dataset_queries is not None:
+        query_expression = " and ".join(dataset_queries)
         print(f"<<<ATTN>>> Querying dataset of size {original_size} with expression: '{query_expression}'")
         val_data = val_data.query(query_expression)
         new_size = val_data.shape[0]
@@ -204,14 +204,31 @@ def save_shap_values(
         if (new_size == original_size) or (new_size == 0):
             print("<<<ATTN>>> WARNING query didn't do anything, or it did too much")
     
-    # Shuffle validation dataset and split it in background and validation.
-    if perm_path is None:
-        perm = np.random.permutation(np.arange(len(val_data)))
+    # Split dataset into background and validation.
+    # Existing split
+    if bgd_loc_path is not None:
+        print("<<<ATTN>>> Loading existing bgd split")
+        loc_inds = np.loadtxt(bgd_loc_path).astype(int)
+        bgd = val_data.loc[loc_inds]
+    
+    # Must create a new split
     else:
-        perm = np.loadtxt(perm_path).astype(int)
-    np.savetxt(output_path + "/perm.txt", perm, fmt="%d")
-    bgd = np.stack(val_data.iloc[perm[:bgd_size]]['full'])
-    val = np.stack(val_data.iloc[perm[bgd_size:]]['full'])
+        print("<<<ATTN>>> Creating new bgd split")
+        if bgd_queries is not None:
+            query_expression = " and ".join(bgd_queries)
+            print(f"<<<ATTN>>> Querying bgd dataset with expression: '{query_expression}'")
+            bgd = val_data.query(query_expression)
+        else:
+            bgd = val_data
+        bgd = bgd.sample(bgd_size)
+    
+    bgd_indices = bgd.index.values.tolist()
+    np.savetxt(output_path + "/bgd_loc_indices.txt", bgd_indices, fmt="%d")
+    remaining_indices = val_data.index.values.tolist()
+    for index in bgd_indices: remaining_indices.pop(index)
+    np.savetxt(output_path + "/val_loc_indices.txt", remaining_indices, fmt='%d')
+    bgd = np.stack(bgd['full'])
+    val = np.stack(val_data.loc[remaining_indices]['full'])
 
     sc = ShapCalculator(
         mode, 
@@ -221,19 +238,19 @@ def save_shap_values(
         inputs_ignored=inputs_ignored,
     )
 
-    bgd_pred = model_wrapper.make_prediction(bgd)
-    bgd_mean = np.mean(bgd_pred)
+    bgd_mean = model_wrapper.make_prediction(bgd).mean(0)
     
     # TODO arbitrary number of non-sequence items
     result = {
         "sequence": [],
-        "shap_values": [],
-        "intensity": [],
         "energy": [],
         "charge": [],
         "method": [],
         "bgd_mean": [],
     }
+    for mode_ in sc.mode: 
+        result[f'intensity_{mode_}'] = []
+        result[f'shap_values_{mode_}'] = []
     # PUT IT BACK AFTER USAGE
     #for INDEX in range(1000):
     for INDEX in range(val.shape[0]):
@@ -244,6 +261,12 @@ def save_shap_values(
             for key, value in result.items():
                 if key == "bgd_mean":
                     value.append(bgd_mean)
+                elif 'intensity' in key:
+                    mode = key.split('_')[-1]
+                    value.append(out_dict['intensity'][mode])
+                elif 'shap' in key:
+                    mode = key.split('_')[-1]
+                    value.append(out_dict['shap_values'][mode].to_list())
                 else:
                     value.append(out_dict[key])
         
@@ -278,10 +301,11 @@ if __name__ == "__main__":
 
     save_shap_values(
         val_data_path=config["val_inps_path"],
-        queries=config['queries'],
+        dataset_queries=config['dataset_queries'],
+        bgd_queries=config['bgd_queries'],
         model_wrapper=model_wrapper,
         mode=config["mode"],
-        perm_path=config["perm_path"],
+        bgd_loc_path=config["bgd_loc_path"],
         output_path=output_dir,
         samp=config["samp"],
         bgd_size=config["bgd_sz"],

@@ -275,20 +275,29 @@ class KoinaWrapper(ModelWrapper):
                 return np.zeros(len(inputs))
             
             # Find the annotation/mode in the koina output
-            ann_bool = preds["annotation"] == bytes(self.mode, "utf-8")
+            results = {}
+            missing_values = {}
+            for mode in self.mode:
+                results[mode] = []
+                missing_values[mode] = 0
+
+                ann_bool = preds["annotation"] == bytes(mode, "utf-8")
             
-            # If you don't find it, return 0 prediction
-            if len(preds[ann_bool]["intensities"]) < len(sequences):
-                if silent == False: print(preds)
-                results = []
-                for i in range(len(sequences)):
-                    if i not in preds[ann_bool]["intensities"].index:
-                        results.append(0.0)
-                    else:
-                       results.append(preds[ann_bool]["intensities"][i])
-            else:
-                results = preds[ann_bool]["intensities"].to_numpy()
-            return np.array(results)
+                # If you don't find it, return 0 prediction
+                if len(preds[ann_bool]["intensities"]) < len(sequences):
+                    if silent == False: print(preds)
+                    for i in range(len(sequences)):
+                        if i not in preds[ann_bool]["intensities"].index:
+                            results[mode].append(0.0)
+                            missing_values[mode] += 1
+                        else:
+                           results[mode].append(preds[ann_bool]["intensities"][i])
+                else:
+                    results[mode] = preds[ann_bool]["intensities"].to_list()
+                
+                assert len(results[mode]) == len(sequences)
+            
+            return pd.DataFrame(results).to_numpy()
 
 
 class ChargeStateWrapper(ModelWrapper):
