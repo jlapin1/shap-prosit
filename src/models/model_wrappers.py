@@ -198,7 +198,7 @@ class KoinaWrapper(ModelWrapper):
         self.mode = mode
         self.inputs_ignored = inputs_ignored
 
-    def make_prediction(self, inputs: ndarray) -> ndarray:
+    def make_prediction(self, inputs: ndarray, silent: bool=True) -> ndarray:
         # set mode = "rt" to enter retention time mode
         # inputs["sequences"] = [["W", "E"],[],[]]
         if self.mode == "rt":
@@ -273,29 +273,21 @@ class KoinaWrapper(ModelWrapper):
                     success = True
             if counter >= 5:
                 return np.zeros(len(inputs))
-            if len(
-                preds[preds["annotation"] == bytes(self.mode, "utf-8")]["intensities"]
-            ) < len(sequences):
-                print(preds)
+            
+            # Find the annotation/mode in the koina output
+            ann_bool = preds["annotation"] == bytes(self.mode, "utf-8")
+            
+            # If you don't find it, return 0 prediction
+            if len(preds[ann_bool]["intensities"]) < len(sequences):
+                if silent == False: print(preds)
                 results = []
                 for i in range(len(sequences)):
-                    if (
-                        i
-                        not in preds[preds["annotation"] == bytes(self.mode, "utf-8")][
-                            "intensities"
-                        ].index
-                    ):
+                    if i not in preds[ann_bool]["intensities"].index:
                         results.append(0.0)
                     else:
-                        results.append(
-                            preds[preds["annotation"] == bytes(self.mode, "utf-8")][
-                                "intensities"
-                            ][i]
-                        )
+                       results.append(preds[ann_bool]["intensities"][i])
             else:
-                results = preds[preds["annotation"] == bytes(self.mode, "utf-8")][
-                    "intensities"
-                ].to_numpy()
+                results = preds[ann_bool]["intensities"].to_numpy()
             return np.array(results)
 
 

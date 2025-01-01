@@ -1,14 +1,15 @@
 shap_calculator:
   # SHAP calculation settings
-  output_dir: UVPD_b5
+  output_dir: b7+1
   val_inps_path: "./val_inps.parquet"
-  mode: b5+1
-  perm_path: # Path or leave empty to generate and save new permutation
+  mode: b7+1
+  perm_path: b7/perm.txt # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
-  inputs_ignored: 3
+  inputs_ignored: 3 # Trailing attributes to ignore in input vector
   queries:
-    - "method == 'HCD'"
+    - "peptide_length > 7"
+    #- "method == 'HCD'"
   
   # Reconstituting a saved torch model
   model_type: koina

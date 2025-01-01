@@ -166,7 +166,7 @@ class ShapCalculator:
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
         inten = float(orig_spec.squeeze())
-        shap_values = ex.shap_values(inpvec, nsamples=samp)
+        shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
 
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     output_dir = config["mode"] if config['output_dir'] is None else config['output_dir']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        os.system(f"cp config.yaml {output_dir}/")
+    os.system(f"cp config.yaml {output_dir}/")
 
     model_wrapper = model_wrappers[config["model_type"]](
         model_path=config["model_path"],
