@@ -207,9 +207,9 @@ def save_shap_values(
     # Shuffle validation dataset and split it in background and validation.
     if perm_path is None:
         perm = np.random.permutation(np.arange(len(val_data)))
-        np.savetxt(output_path + "/perm.txt", perm, fmt="%d")
     else:
         perm = np.loadtxt(perm_path).astype(int)
+    np.savetxt(output_path + "/perm.txt", perm, fmt="%d")
     bgd = np.stack(val_data.iloc[perm[:bgd_size]]['full'])
     val = np.stack(val_data.iloc[perm[bgd_size:]]['full'])
 
