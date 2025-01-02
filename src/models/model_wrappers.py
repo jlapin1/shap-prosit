@@ -22,11 +22,12 @@ import re
 import yaml
 from numpy import ndarray
 
-from koinapy import Koina
+from . import PeptideEncoder
+import torch as th
+device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
-#from . import PeptideEncoder
-#import torch as th
-#device = th.device("cuda" if th.cuda.is_available() else "cpu")
+"""
+from koinapy import Koina
 
 #from . import TransformerModel
 from .ChargeState import custom_keras_utils as cutils
@@ -34,6 +35,7 @@ from .ChargeState.chargestate import ChargeStateDistributionPredictor
 from .ChargeState.dlomix_preprocessing import to_dlomix
 import keras
 import tensorflow as tf
+"""
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -124,6 +126,7 @@ class TorchIntensityWrapper(ModelWrapper):
     ) -> None:
 
         ion_dict = pd.read_csv(ion_dict_path, index_col='full')
+        self.ion_dict = ion_dict
         self.ion_ind = ion_dict.loc[mode]['index']
         with open(os.path.join(yaml_dir_path, "model.yaml")) as f: model_config = yaml.safe_load(f)
         with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: load_config = yaml.safe_load(f)
@@ -182,7 +185,7 @@ class TorchIntensityWrapper(ModelWrapper):
         with th.no_grad():
             out = self.model(**self.hx(inputs))
         out = out / out.max(dim=1, keepdim=True)[0]
-        prediction = (out[:, self.ion_ind]).detach().cpu().numpy()
+        prediction = (out[:, self.ion_ind.values]).detach().cpu().numpy()
         return prediction
 
 class KoinaWrapper(ModelWrapper):
