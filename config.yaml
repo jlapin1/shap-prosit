@@ -1,31 +1,44 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    output_dir: test
-    val_data_path: "data/val_inps.parquet"
+    output_dir: prosit_eid
+    val_data_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
     mode:
-      - b3+1
-      - b5+1
-      - b7+1
-      - b9+1
-      - y3+1
-      - y5+1
-      - y7+1
-      - y9+1
+      - a7
+      - A7
+      - b7
+      - y7
+      #- c7
+      - C7
+      - z7
+      - Z7
+      - x7
+      - X7
+      - a7^2
+      - A7^2
+      - b7^2
+      - y7^2
+      #- c7^2
+      - C7^2
+      - z7^2
+      - Z7^2
+      - x7^2
+      - X7^2
     bgd_loc_path: # Path or leave empty to generate and save new permutation
     base_samp: 200
     extra_samp: [20, 500]
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore in input vector
     dataset_queries:
-      - "method == 'HCD'"
+      - "method == 'EID'"
+      - "peptide_length > 7"
     bgd_queries:
-      - "peptide_length > 9"
+      - "peptide_length > 7"
   
   # Reconstituting a saved torch model
   model_settings:
-    model_type: koina
-    model_path: "Prosit_2019_intensity" #"/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945"
+    model_type: torch_prosit
+    model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945" # "Prosit_2019_intensity"
     ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/filtered_ion_dict.csv"
     token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
     yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"

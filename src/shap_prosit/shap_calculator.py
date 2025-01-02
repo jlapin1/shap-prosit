@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 import shap
 sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
+from tqdm import tqdm
 
 class ShapCalculator:
     def __init__(
@@ -254,8 +255,9 @@ def save_shap_values(
         result[f'intensity_{mode_}'] = []
         result[f'shap_values_{mode_}'] = []
     
-    for INDEX in range(val.shape[0]):
-        print("\r%d/%d" % (INDEX, len(val)), end="\n")
+    pbar = tqdm(range(val.shape[0]))
+    for INDEX in pbar:
+        pbar.set_description("Calculating SHAP explanations")
         sequence = sc.val[INDEX : INDEX + 1]
         
         # Set sampling amount
