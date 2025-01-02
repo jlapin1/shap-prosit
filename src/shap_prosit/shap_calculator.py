@@ -14,7 +14,7 @@ from src.models.model_wrappers import ModelWrapper, model_wrappers
 class ShapCalculator:
     def __init__(
         self,
-        mode: str,
+        mode: List[str],
         dset: pd.DataFrame,
         bgd: pd.DataFrame,
         model_wrapper: ModelWrapper,
@@ -37,7 +37,7 @@ class ShapCalculator:
             self.ext = {ion: int(ion[1:].split("+")[0].split('^')[0]) for ion in mode}
         self.mode = mode
 
-        self.fnull = self.model_wrapper.make_prediction(bgd).squeeze().mean(0)
+        self.fnull = self.model_wrapper.make_prediction(bgd).mean(0)
 
         self.savepep = []
         self.savecv = []
@@ -162,16 +162,16 @@ class ShapCalculator:
         # Other outputs to save
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
-        original_intensity = self.ens_pred(inpvec, mask=False).squeeze()
+        original_intensity = self.ens_pred(inpvec, mask=False)
         too_short = peptide_length <= np.array(list(self.ext.values()))
         # Identify impossible sequences by setting intensity to -1
-        original_intensity[too_short] = -1
+        original_intensity[:, too_short] = -1
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
 
         return {
-            "intensity": pd.Series(original_intensity, index=self.mode),
-            "shap_values": pd.DataFrame(shap_values.squeeze()[:peptide_length], columns=self.mode),
+            "intensity": pd.Series(original_intensity.squeeze(), index=self.mode),
+            "shap_values": pd.DataFrame(shap_values[0, :peptide_length], columns=self.mode),
             "sequence": seqrep,
             "charge": int(seq[-3]),
             "energy": float(seq[-2]),
@@ -225,7 +225,7 @@ def save_shap_values(
     bgd_indices = bgd.index.values.tolist()
     np.savetxt(output_path + "/bgd_loc_indices.txt", bgd_indices, fmt="%d")
     remaining_indices = val_data.index.values.tolist()
-    for index in bgd_indices: remaining_indices.pop(index)
+    for index in bgd_indices: remaining_indices.remove(index)
     np.savetxt(output_path + "/val_loc_indices.txt", remaining_indices, fmt='%d')
     bgd = np.stack(bgd['full'])
     val = np.stack(val_data.loc[remaining_indices]['full'])
@@ -237,8 +237,8 @@ def save_shap_values(
         model_wrapper=model_wrapper,
         inputs_ignored=inputs_ignored,
     )
-
-    bgd_mean = model_wrapper.make_prediction(bgd).mean(0)
+    
+    bgd_mean = pd.Series(sc.fnull, index=sc.mode)
     
     # TODO arbitrary number of non-sequence items
     result = {
@@ -246,21 +246,21 @@ def save_shap_values(
         "energy": [],
         "charge": [],
         "method": [],
-        "bgd_mean": [],
     }
-    for mode_ in sc.mode: 
+    for mode_ in sc.mode:
+        result[f'bgd_mean_{mode_}'] = []
         result[f'intensity_{mode_}'] = []
         result[f'shap_values_{mode_}'] = []
-    # PUT IT BACK AFTER USAGE
-    #for INDEX in range(1000):
+    
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         sequence = sc.val[INDEX : INDEX + 1]
         out_dict = sc.calc_shap_values(sequence, samp=samp)
         if out_dict != False:
             for key, value in result.items():
-                if key == "bgd_mean":
-                    value.append(bgd_mean)
+                if "bgd_mean" in key:
+                    mode = key.split('_')[-1]
+                    value.append(bgd_mean[mode])
                 elif 'intensity' in key:
                     mode = key.split('_')[-1]
                     value.append(out_dict['intensity'][mode])

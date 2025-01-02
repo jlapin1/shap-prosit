@@ -50,8 +50,10 @@ class ShapVisualizationIntensity:
         assert int_col in df.columns
         sv_col = f"shap_values_{ion}"
         assert sv_col in df.columns
-        df = df[['sequence', 'energy', 'charge', 'method', 'bgd_mean', 'sequence_length', int_col, sv_col]]
-        df = df.rename(columns={int_col: 'intensity', sv_col: 'shap_values'})
+        bgd_col = f"shap_values_{ion}"
+        assert bgd_col in df.columns
+        df = df[['sequence', 'energy', 'charge', 'method', 'sequence_length', bgd_col, int_col, sv_col]]
+        df = df.rename(columns={bgd_col: 'bgd_mean', int_col: 'intensity', sv_col: 'shap_values'})
         # Automatic filter based on sequences for which ion couldn't be predicted
         df = df[df['intensity'] != -1]
         
