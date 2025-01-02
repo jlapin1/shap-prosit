@@ -184,11 +184,13 @@ def save_shap_values(
     mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     bgd_loc_path: Union[str, bytes, os.PathLike] = None,
-    samp: int = 1000,
+    base_samp: int = 1000,
+    extra_samp: List[int] = None,
     bgd_size: int = 100,
     inputs_ignored: int = 3,
     dataset_queries: List[str] = None,
     bgd_queries: List[str] = None,
+    **kwargs
 ):
     print("<<<ATTN>>> Starting calculation loop")
 
@@ -255,7 +257,21 @@ def save_shap_values(
     for INDEX in range(val.shape[0]):
         print("\r%d/%d" % (INDEX, len(val)), end="\n")
         sequence = sc.val[INDEX : INDEX + 1]
-        out_dict = sc.calc_shap_values(sequence, samp=samp)
+        
+        # Set sampling amount
+        if extra_samp is not None:
+            explain_length = sum(sequence.squeeze()[:-inputs_ignored] != '')
+            if explain_length >= extra_samp[0]:
+                Samp = extra_samp[1]
+            else:
+                Samp = base_samp
+        else:
+            Samp = base_samp
+
+        # Calculate shapley values
+        out_dict = sc.calc_shap_values(sequence, samp=Samp)
+        
+        # Save results
         if out_dict != False:
             for key, value in result.items():
                 if "bgd_mean" in key:
@@ -285,29 +301,22 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)["shap_calculator"]
     
-    output_dir = config["mode"] if config['output_dir'] is None else config['output_dir']
+    # Output directory
+    config_  = config['shap_settings']
+    output_dir = config_["mode"] if config_['output_dir'] is None else config_['output_dir']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     os.system(f"cp config.yaml {output_dir}/")
-
-    model_wrapper = model_wrappers[config["model_type"]](
-        model_path=config["model_path"],
-        ion_dict_path=config['ion_dict_path'],
-        token_dict_path=config['token_dict_path'],
-        yaml_dir_path=config['yaml_dir_path'],
-        mode=config["mode"],
-        method_list=config['method_list'],
+    
+    # Model
+    model_wrapper = model_wrappers[config['model_settings']["model_type"]](
+        mode=config['shap_settings']["mode"],
+        **config['model_settings'],
     )
-
+    
+    # SHAP calculation
     save_shap_values(
-        val_data_path=config["val_inps_path"],
-        dataset_queries=config['dataset_queries'],
-        bgd_queries=config['bgd_queries'],
         model_wrapper=model_wrapper,
-        mode=config["mode"],
-        bgd_loc_path=config["bgd_loc_path"],
         output_path=output_dir,
-        samp=config["samp"],
-        bgd_size=config["bgd_sz"],
-        inputs_ignored=config['inputs_ignored'],
+        **config['shap_settings']
     )
