@@ -11,7 +11,7 @@ shap_calculator:
     - y5+1
     - y7+1
     - y9+1
-  bgd_loc_path: test/bgd_loc_indices.txt # Path or leave empty to generate and save new permutation
+  bgd_loc_path: # Path or leave empty to generate and save new permutation
   samp: 200
   bgd_sz: 100
   inputs_ignored: 3 # Trailing attributes to ignore in input vector
@@ -29,8 +29,9 @@ shap_calculator:
   method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
   
 shap_visualization:
-  mode: b5+1
-  sv_path: "UVPD_b5/output.parquet"
+  mode: b7+1
+  sv_path: "test/output.parquet"
+  out_path: test/b7+1
   filter_expr:
   clustering:
     run: False

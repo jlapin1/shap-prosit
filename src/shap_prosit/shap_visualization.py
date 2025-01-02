@@ -44,10 +44,22 @@ class ShapVisualizationIntensity:
             self.position_combos = position_combos
         df = pd.read_parquet(sv_path)
         df["sequence_length"] = np.vectorize(len)(df["sequence"])
+        
+        # Grab only the intensity and shap column for the ion of interest
+        int_col = f"intensity_{ion}"
+        assert int_col in df.columns
+        sv_col = f"shap_values_{ion}"
+        assert sv_col in df.columns
+        df = df[['sequence', 'energy', 'charge', 'method', 'bgd_mean', 'sequence_length', int_col, sv_col]]
+        df = df.rename(columns={int_col: 'intensity', sv_col: 'shap_values'})
+        # Automatic filter based on sequences for which ion couldn't be predicted
+        df = df[df['intensity'] != -1]
+        
+        # Custom filter (from config)
         if filter_expr is not None:
             df = df.query(filter_expr)
         self.ion = ion
-
+        
         # Get data from dataframe
         self.pred_intensities = df["intensity"].tolist()
         self.charge = df["charge"].tolist()
@@ -327,7 +339,7 @@ class ShapVisualizationIntensity:
         fig.colorbar(im, ax=axes[:2]).ax.set_yscale("linear")
         fig.colorbar(im2, ax=axes[2:]).ax.set_yscale("linear")
         if save is not False:
-            plt.savefig(save + "/aa_only_plot.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save, "aa_only_plot.png"), bbox_inches="tight")
         else:
             plt.show()
 
@@ -356,7 +368,7 @@ class ShapVisualizationIntensity:
         fig.colorbar(im).ax.set_yscale("linear")
         fig.colorbar(im2).ax.set_yscale("linear")
         if save is not False:
-            plt.savefig(save + "/position_only_plot.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save,"position_only_plot.png"), bbox_inches="tight")
         else:
             plt.show()
 
@@ -407,7 +419,7 @@ class ShapVisualizationIntensity:
         fig.colorbar(im2).ax.set_yscale("linear")
         fig.colorbar(im3).ax.set_yscale("linear")
         if save is not False:
-            plt.savefig(save + "/position_heatmap.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save, "position_heatmap.png"), bbox_inches="tight")
         else:
             plt.show()
 
@@ -463,7 +475,7 @@ class ShapVisualizationIntensity:
         fig.colorbar(im3, shrink=0.7).ax.set_yscale("linear")
 
         if save is not False:
-            plt.savefig(save + "/aa_heatmap.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save, "aa_heatmap.png"), bbox_inches="tight")
         else:
             plt.show()
 
@@ -501,7 +513,7 @@ class ShapVisualizationIntensity:
         # cbar.set_label("Position")
 
         if save is not False:
-            plt.savefig(save + "/swarmplot.png")
+            plt.savefig(os.path.join(save, "swarmplot.png"))
         else:
             plt.show()
 
@@ -581,7 +593,7 @@ class ShapVisualizationIntensity:
             )
 
         if save is not False:
-            plt.savefig(save + "/boxplot_position.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save, "boxplot_position.png"), bbox_inches="tight")
         else:
             plt.show()
 
@@ -654,11 +666,13 @@ class ShapVisualizationIntensity:
             ).set_title("mean(sv) without Proline")
 
         if save is not False:
-            plt.savefig(save + "/boxplot_bi_token.png", bbox_inches="tight")
+            plt.savefig(os.path.join(save, "boxplot_bi_token.png"), bbox_inches="tight")
         else:
             plt.show()
 
     def full_report(self, save="."):
+        if not os.path.exists(save):
+            os.makedirs(save)
         self.aa_only_plot(save=save)
         self.position_only_plot(save=save)
         self.position_heatmap(save=save)
@@ -1012,10 +1026,22 @@ if __name__ == "__main__":
             ion=mode,
             filter_expr=config["shap_visualization"]["filter_expr"],
         )
-
-    visualization.full_report(
-        save=str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
-    )
+    
+    """Full report"""
+    # If no specified out_path, save in dataframe's directory
+    if config['shap_visualization']['out_path'] is None:
+        save_path = str(Path(config["shap_visualization"]["sv_path"]).parent.absolute())
+    else:
+        save_path = config['shap_visualization']['out_path']
+        if os.path.exists(save_path):
+            user = input("<<<WARNING>>> The out_path you specified already exists. Continue? (y/n) ")
+            if user.lower() == 'n':
+                sys.exit()
+            else:
+                user = input("Would you like to change the directory path to save? (y/n) ")
+                if user.lower() == 'y':
+                    save_path = input("Type the new directory path starting from shap-prosit directory\n>>> ")
+    visualization.full_report(save=save_path)
     
     if config['shap_visualization']['clustering']['run']:
         visualization.clustering(config["shap_visualization"])
