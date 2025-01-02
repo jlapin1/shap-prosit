@@ -1,32 +1,35 @@
 shap_calculator:
   # SHAP calculation settings
-  output_dir: test
-  val_inps_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
-  mode:
-    - b3
-    - b5
-    - b7
-    - b9
-    - y3
-    - y5
-    - y7
-    - y9
-  bgd_loc_path: # Path or leave empty to generate and save new permutation
-  samp: 500
-  bgd_sz: 100
-  inputs_ignored: 3 # Trailing attributes to ignore in input vector
-  dataset_queries:
-    - "method == 'HCD'"
-  bgd_queries:
-    - "peptide_length > 9"
+  shap_settings:
+    output_dir: test
+    val_data_path: "data/val_inps.parquet"
+    mode:
+      - b3+1
+      - b5+1
+      - b7+1
+      - b9+1
+      - y3+1
+      - y5+1
+      - y7+1
+      - y9+1
+    bgd_loc_path: # Path or leave empty to generate and save new permutation
+    base_samp: 200
+    extra_samp: [20, 500]
+    bgd_sz: 100
+    inputs_ignored: 3 # Trailing attributes to ignore in input vector
+    dataset_queries:
+      #- "method == 'HCD'"
+    bgd_queries:
+      - "peptide_length > 9"
   
   # Reconstituting a saved torch model
-  model_type: torch
-  model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569" #"Prosit_2019_intensity"
-  ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/filtered_ion_dict.csv"
-  token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
-  yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/yaml"
-  method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
+  model_settings:
+    model_type: koina
+    model_path: "Prosit_2019_intensity" #"/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569"
+    ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/filtered_ion_dict.csv"
+    token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
+    yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/yaml"
+    method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
   
 shap_visualization:
   mode: b7+1
