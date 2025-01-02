@@ -22,20 +22,28 @@ import re
 import yaml
 from numpy import ndarray
 
-from . import PeptideEncoder
-import torch as th
-device = th.device("cuda" if th.cuda.is_available() else "cpu")
+import pkg_resources
+installed_packages = pkg_resources.working_set
+installed_packages = installed_packages.entry_keys[
+    '/cmnfs/home/j.lapin/miniconda3/envs/shap/lib/python3.10/site-packages'
+]
+if 'torch' in installed_packages:
+    from . import PeptideEncoderModel
+    from . import PrositModel
+    import torch as th
+    device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
-"""
-from koinapy import Koina
+if 'koinapy' in installed_packages:
+    from koinapy import Koina
 
-#from . import TransformerModel
-from .ChargeState import custom_keras_utils as cutils
-from .ChargeState.chargestate import ChargeStateDistributionPredictor
-from .ChargeState.dlomix_preprocessing import to_dlomix
-import keras
-import tensorflow as tf
-"""
+if 'dlomix' in installed_packages:
+    #from . import TransformerModel
+    from .ChargeState import custom_keras_utils as cutils
+    from .ChargeState.chargestate import ChargeStateDistributionPredictor
+    from .ChargeState.dlomix_preprocessing import to_dlomix
+    import keras
+    import tensorflow as tf
+
 
 def hx(tokens):
     sequence = tokens[:, :-2]
@@ -117,35 +125,37 @@ class TransformerIntensityWrapper(ModelWrapper):
 
 class TorchIntensityWrapper(ModelWrapper):
     def __init__(self, 
-        model_path: Union[str, bytes, os.PathLike], 
         ion_dict_path: Union[str, bytes, os.PathLike],
         token_dict_path: Union[str, bytes, os.PathLike],
         yaml_dir_path: Union[str, bytes, os.PathLike],
         mode: str,
-        method_list: list,
     ) -> None:
 
         ion_dict = pd.read_csv(ion_dict_path, index_col='full')
         self.ion_dict = ion_dict
         self.ion_ind = ion_dict.loc[mode]['index']
-        with open(os.path.join(yaml_dir_path, "model.yaml")) as f: model_config = yaml.safe_load(f)
-        with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: load_config = yaml.safe_load(f)
-        num_tokens = len(open(token_dict_path).read().strip().split("\n")) + 1
+        with open(os.path.join(yaml_dir_path, "model.yaml")) as f: 
+            self.model_config = yaml.safe_load(f)
+        with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: 
+            load_config = yaml.safe_load(f)
+        self.num_tokens = len(open(token_dict_path).read().strip().split("\n")) + 1
+        self.token_dict = self.create_dictionary(token_dict_path)
+        self.max_charge= load_config['charge'][1]
+        # Same code as in loader_hf.py
+        self.method_dic = {method: m for m, method in enumerate(load_config['method_list'])}
+        self.method_dicr = {n:m for m,n in self.method_dic.items()}
+        
+        """
         self.model = PeptideEncoder(
-            tokens = num_tokens,
-            final_units = len(ion_dict),
+            tokens = self.num_tokens,
+            final_units = len(self.ion_dict),
             max_charge = load_config['charge'][-1],
             **model_config
         )
         self.model.to(device)
         self.model.load_state_dict(th.load(model_path, map_location=device))
         self.model.eval()
-        
-        self.token_dict = self.create_dictionary(token_dict_path)
-
-        # Same code as in loader_hf.py
-        self.method_dic = {method: m for m, method in enumerate(method_list)}
-        self.method_dicr = {n:m for m,n in self.method_dic.items()}
+        """
 
     def create_dictionary(self, dictionary_path):
         amod_dic = {
@@ -187,6 +197,58 @@ class TorchIntensityWrapper(ModelWrapper):
         out = out / out.max(dim=1, keepdim=True)[0]
         prediction = (out[:, self.ion_ind.values]).detach().cpu().numpy()
         return prediction
+
+class TorchPE(TorchIntensityWrapper):
+    def __init__(self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        ion_dict_path: Union[str, bytes, os.PathLike],
+        token_dict_path: Union[str, bytes, os.PathLike],
+        yaml_dir_path: Union[str, bytes, os.PathLike],
+        mode: str,
+        **kwargs
+    ) -> None:
+        super().__init__(
+            ion_dict_path=ion_dict_path,
+            token_dict_path=token_dict_path,
+            yaml_dir_path=yaml_dir_path,
+            mode=mode,
+        )
+
+        self.model = PeptideEncoderModel(
+            tokens = self.num_tokens,
+            final_units = len(self.ion_dict),
+            max_charge = self.max_charge,
+            kwargs = self.model_config
+        )
+        self.model.to(device)
+        self.model.load_state_dict(th.load(model_path, map_location=device))
+        self.model.eval()
+
+class TorchProsit(TorchIntensityWrapper):
+    def __init__(self, 
+        model_path: Union[str, bytes, os.PathLike], 
+        ion_dict_path: Union[str, bytes, os.PathLike],
+        token_dict_path: Union[str, bytes, os.PathLike],
+        yaml_dir_path: Union[str, bytes, os.PathLike],
+        mode: str,
+        **kwargs
+    ) -> None:
+        super().__init__(
+            ion_dict_path=ion_dict_path,
+            token_dict_path=token_dict_path,
+            yaml_dir_path=yaml_dir_path,
+            mode=mode,
+        )
+
+        self.model = PrositModel(
+            tokens = self.num_tokens,
+            final_units = len(self.ion_dict),
+            max_charge = self.max_charge,
+            kwargs = self.model_config
+        )
+        self.model.to(device)
+        self.model.load_state_dict(th.load(model_path, map_location=device))
+        self.model.eval()
 
 class KoinaWrapper(ModelWrapper):
     def __init__(
@@ -360,7 +422,8 @@ class ChargeStateWrapper(ModelWrapper):
 model_wrappers = {
     "prosit": PrositIntensityWrapper,
     "transformer": TransformerIntensityWrapper,
-    "torch": TorchIntensityWrapper,
+    "torch_pe": TorchPE,
+    "torch_prosit": TorchProsit,
     "koina": KoinaWrapper,
     "charge": ChargeStateWrapper,
 }

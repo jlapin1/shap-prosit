@@ -18,18 +18,17 @@ shap_calculator:
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore in input vector
     dataset_queries:
-      #- "method == 'HCD'"
+      - "method == 'HCD'"
     bgd_queries:
       - "peptide_length > 9"
   
   # Reconstituting a saved torch model
   model_settings:
     model_type: koina
-    model_path: "Prosit_2019_intensity" #"/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/weights/model_epoch26_-0.8569"
-    ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/filtered_ion_dict.csv"
+    model_path: "Prosit_2019_intensity" #"/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945"
+    ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/filtered_ion_dict.csv"
     token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
-    yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-13_16-05-52/yaml"
-    method_list: [ECD,EID,UVPD,HCD] # FIXME MUST BE SAME AS IN loader.yaml
+    yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
   mode: b7+1
