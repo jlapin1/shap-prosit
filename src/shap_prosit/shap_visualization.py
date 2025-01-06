@@ -47,10 +47,10 @@ class ShapVisualizationIntensity:
         
         # Grab only the intensity and shap column for the ion of interest
         int_col = f"intensity_{ion}"
-        assert int_col in df.columns
+        assert int_col in df.columns, f"Available columns {df.columns}"
         sv_col = f"shap_values_{ion}"
         assert sv_col in df.columns
-        bgd_col = f"shap_values_{ion}"
+        bgd_col = f"bgd_mean_{ion}"
         assert bgd_col in df.columns
         df = df[['sequence', 'energy', 'charge', 'method', 'sequence_length', bgd_col, int_col, sv_col]]
         df = df.rename(columns={bgd_col: 'bgd_mean', int_col: 'intensity', sv_col: 'shap_values'})

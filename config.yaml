@@ -1,8 +1,8 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    output_dir: prosit_eid
     val_data_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
+    output_dir: prosit_uvpd
     mode:
       - a7
       - A7
@@ -11,9 +11,9 @@ shap_calculator:
       #- c7
       - C7
       - z7
-      - Z7
-      - x7
-      - X7
+      #- Z7
+      #- x7
+      #- X7
       - a7^2
       - A7^2
       - b7^2
@@ -21,16 +21,16 @@ shap_calculator:
       #- c7^2
       - C7^2
       - z7^2
-      - Z7^2
-      - x7^2
-      - X7^2
+      #- Z7^2
+      #- x7^2
+      #- X7^2
     bgd_loc_path: # Path or leave empty to generate and save new permutation
     base_samp: 200
     extra_samp: [20, 500]
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore in input vector
     dataset_queries:
-      - "method == 'EID'"
+      - "method == 'UVPD'"
       - "peptide_length > 7"
     bgd_queries:
       - "peptide_length > 7"
@@ -44,9 +44,9 @@ shap_calculator:
     yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
-  mode: b7+1
-  sv_path: "test/output.parquet"
-  out_path: test/b7+1
+  mode: y3+1
+  sv_path: "multi_koina_output/output.parquet"
+  out_path: multi_koina_output/y3+1
   filter_expr:
   clustering:
     run: False
