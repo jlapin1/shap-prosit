@@ -32,12 +32,11 @@ class ShapCalculator:
 
         self.bgd_size = bgd.shape[0]
 
-        if mode in ["rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
+        if mode[0] in ["rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
             self.ext = 0
         else:
             self.ext = {ion: int(ion[1:].split("+")[0].split('^')[0]) for ion in mode}
         self.mode = mode
-
         self.fnull = self.model_wrapper.make_prediction(bgd).mean(0)
 
         self.savepep = []
@@ -164,9 +163,13 @@ class ShapCalculator:
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
         original_intensity = self.ens_pred(inpvec, mask=False)
-        too_short = peptide_length <= np.array(list(self.ext.values()))
+        too_short = False if self.ext == 0 else peptide_length <= np.array(list(self.ext.values()))
         # Identify impossible sequences by setting intensity to -1
         original_intensity[:, too_short] = -1
+
+        shap_values = np.array(shap_values)
+        if self.ext == 0:
+            shap_values = shap_values.reshape(1, -1, len(self.mode))
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
 
@@ -206,6 +209,7 @@ def save_shap_values(
         print(f"<<<ATTN>>> Dataset now has size {val_data.shape[0]}")
         if (new_size == original_size) or (new_size == 0):
             print("<<<ATTN>>> WARNING query didn't do anything, or it did too much")
+        print(val_data)
     
     # Split dataset into background and validation.
     # Existing split
@@ -304,7 +308,7 @@ if __name__ == "__main__":
         config = yaml.safe_load(file)["shap_calculator"]
     
     # Output directory
-    config_  = config['shap_settings']
+    config_ = config['shap_settings']
     output_dir = config_["mode"] if config_['output_dir'] is None else config_['output_dir']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

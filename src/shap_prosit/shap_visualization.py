@@ -687,10 +687,10 @@ class ShapVisualizationGeneral():
     def __init__(
         self,
         sv_path: Union[str, bytes, os.PathLike],
-        ion: str,
+        mode: str,
     ) -> None:
 
-        self.ion = ion
+        self.mode = mode
         df = pd.read_parquet(sv_path)
         self.charge = df["charge"].tolist()
         self.seq_list = df["sequence"].tolist()
@@ -728,7 +728,7 @@ class ShapVisualizationGeneral():
                 self.amino_acids_sv[am_ac].append(sh_value)
 
                 # Create token (~id for aa-position plots) for AA and position
-                # 0 is the first index in ion, positives are inside ion
+                # 0 is the first index in ion (from mode... maybe change this later), positives are inside ion
                 # negatives are outside of ion
                 tok_c = (
                     f"{am_ac}_{i}"
@@ -903,7 +903,7 @@ class ShapVisualizationGeneral():
         fig.set_figheight(15)
         fig.set_figwidth(15)
         axes[0].set_title(
-            f"Mean of {'retention time' if ion == 'rt' else 'collisional cross section'} per amino acid & position"
+            f"Mean of {'retention time' if mode == 'rt' else 'collisional cross section'} per amino acid & position"
         )
         im = axes[0].imshow(heatmap_generic, cmap="RdBu_r", norm=TwoSlopeNorm(0))
         axes[1].set_title("Mean of absolute SHAP values per amino acid & position")
@@ -1016,11 +1016,11 @@ class ShapVisualizationGeneral():
 if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
-    mode = config["shap_visualization"]["mode"]
-    
+
+    mode = config["shap_calculator"]["mode"]
     if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
         visualization = ShapVisualizationGeneral(
-            config["shap_visualization"]["sv_path"], ion=mode
+            config["shap_visualization"]["sv_path"], mode=mode
         )
     else:
         visualization = ShapVisualizationIntensity(

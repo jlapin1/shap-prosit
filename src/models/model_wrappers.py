@@ -22,21 +22,46 @@ import re
 import yaml
 from numpy import ndarray
 
-import pkg_resources
-installed_packages = pkg_resources.working_set
-package_key = [m for m in installed_packages.entry_keys.keys() if 'site-packages'==m.split('/')[-1]][0]
-installed_packages = installed_packages.entry_keys[package_key]
+import subprocess
+
+
+def get_installed_packages():
+    packages = []
+    key_packages = {'torch', 'dlomix', 'koinapy'}
+    try:
+        # Run the conda list command
+        result = subprocess.run(['conda', 'list'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        # Check if the command was successful and get installed key packages
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                for key_package in key_packages:
+                    if line.startswith(key_package):
+                        print(line)
+                        packages.append(key_package)
+            return packages
+        else:
+            print("Error:", result.stderr)
+            return packages
+    except Exception as e:
+        print("An exception occurred:", e)
+        return packages
+
+
+installed_packages = get_installed_packages()
+
 if 'torch' in installed_packages:
     from . import PeptideEncoderModel
     from . import PrositModel
     import torch as th
+
     device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
 if 'koinapy' in installed_packages:
     from koinapy import Koina
 
 if 'dlomix' in installed_packages:
-    #from . import TransformerModel
+    # from . import TransformerModel
     from .ChargeState import custom_keras_utils as cutils
     from .ChargeState.chargestate import ChargeStateDistributionPredictor
     from .ChargeState.dlomix_preprocessing import to_dlomix
@@ -45,10 +70,10 @@ if 'dlomix' in installed_packages:
 
 
 def hx(tokens):
-    sequence = tokens[:, :-2]
+    sequence = tokens[:, :-3]
     collision_energy = tf.strings.to_number(tokens[:, -2:-1])
     precursor_charge = tf.one_hot(
-        tf.cast(tf.strings.to_number(tokens[:, -1]), tf.int32) - 1, 6
+        tf.cast(tf.strings.to_number(tokens[:, -3:-2]), tf.int32) - 1, 6
     )
     z = {
         "sequence": sequence,
@@ -75,8 +100,10 @@ def annotations(max_len: int = 30):
                 count += 1
     return ions
 
+
 def integerize_sequence(seq, dictionary):
     return [dictionary[aa] for aa in seq]
+
 
 class ModelWrapper(ABC):
     @abstractmethod
@@ -90,12 +117,13 @@ class ModelWrapper(ABC):
         sequences, precursor charges and collision energy."""
         pass
 
+
 class PrositIntensityWrapper(ModelWrapper):
     def __init__(
-        self, model_path: Union[str, bytes, os.PathLike], 
-        mode: str
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str
     ) -> None:
-
         self.ion_ind = annotations()[mode]
         self.model = PrositIntensityPredictor(seq_length=30)
         latest_checkpoint = tf.train.latest_checkpoint(model_path)
@@ -107,43 +135,42 @@ class PrositIntensityWrapper(ModelWrapper):
 
 class TransformerIntensityWrapper(ModelWrapper):
     def __init__(
-        self, 
-        model_path: Union[str, bytes, os.PathLike], 
-        mode: str
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str
     ) -> None:
-        
         self.ion_ind = annotations()[mode]
         with open(os.path.join(model_path, "model.yaml"), encoding="utf-8") as file:
             model_config = yaml.safe_load(file)
         self.model = TransformerModel(**model_config)
         latest_checkpoint = tf.train.latest_checkpoint(path)
         self.model.load_weights(latest_checkpoint)
-    
+
     def make_prediction(self, inputs: ndarray) -> ndarray:
         return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
 
-class TorchIntensityWrapper(ModelWrapper):
-    def __init__(self, 
-        ion_dict_path: Union[str, bytes, os.PathLike],
-        token_dict_path: Union[str, bytes, os.PathLike],
-        yaml_dir_path: Union[str, bytes, os.PathLike],
-        mode: str,
-    ) -> None:
 
+class TorchIntensityWrapper(ModelWrapper):
+    def __init__(self,
+                 ion_dict_path: Union[str, bytes, os.PathLike],
+                 token_dict_path: Union[str, bytes, os.PathLike],
+                 yaml_dir_path: Union[str, bytes, os.PathLike],
+                 mode: str,
+                 ) -> None:
         ion_dict = pd.read_csv(ion_dict_path, index_col='full')
         self.ion_dict = ion_dict
         self.ion_ind = ion_dict.loc[mode]['index']
-        with open(os.path.join(yaml_dir_path, "model.yaml")) as f: 
+        with open(os.path.join(yaml_dir_path, "model.yaml")) as f:
             self.model_config = yaml.safe_load(f)
-        with open(os.path.join(yaml_dir_path, "loader.yaml")) as f: 
+        with open(os.path.join(yaml_dir_path, "loader.yaml")) as f:
             load_config = yaml.safe_load(f)
         self.num_tokens = len(open(token_dict_path).read().strip().split("\n")) + 1
         self.token_dict = self.create_dictionary(token_dict_path)
-        self.max_charge= load_config['charge'][1]
+        self.max_charge = load_config['charge'][1]
         # Same code as in loader_hf.py
         self.method_dic = {method: m for m, method in enumerate(load_config['method_list'])}
-        self.method_dicr = {n:m for m,n in self.method_dic.items()}
-        
+        self.method_dicr = {n: m for m, n in self.method_dic.items()}
+
         """
         self.model = PeptideEncoder(
             tokens = self.num_tokens,
@@ -158,7 +185,7 @@ class TorchIntensityWrapper(ModelWrapper):
 
     def create_dictionary(self, dictionary_path):
         amod_dic = {
-            line.split()[0]:m for m, line in enumerate(open(dictionary_path))
+            line.split()[0]: m for m, line in enumerate(open(dictionary_path))
         }
         amod_dic['X'] = len(amod_dic)
         amod_dic[''] = amod_dic['X']
@@ -168,18 +195,18 @@ class TorchIntensityWrapper(ModelWrapper):
         """
         Turn list of [seq, energy, charge, method] into model ready tensors
         """
-        sequence = linear_input[:,:-3]
+        sequence = linear_input[:, :-3]
         intseq = th.tensor(
             [
                 integerize_sequence(seq, self.token_dict)
                 for seq in sequence
-            ], 
+            ],
             dtype=th.int32, device=device
         )
-        charge = th.tensor(linear_input[:,-3].astype(int), dtype=th.int32, device=device)
-        energy = th.tensor(linear_input[:,-2].astype(float), dtype=th.float32, device=device)
+        charge = th.tensor(linear_input[:, -3].astype(int), dtype=th.int32, device=device)
+        energy = th.tensor(linear_input[:, -2].astype(float), dtype=th.float32, device=device)
         method = th.tensor(
-            [self.method_dic[tok] for tok in linear_input[:,-1]], 
+            [self.method_dic[tok] for tok in linear_input[:, -1]],
             dtype=th.int32,
             device=device,
         )
@@ -197,15 +224,16 @@ class TorchIntensityWrapper(ModelWrapper):
         prediction = (out[:, self.ion_ind.values]).detach().cpu().numpy()
         return prediction
 
+
 class TorchPE(TorchIntensityWrapper):
-    def __init__(self, 
-        model_path: Union[str, bytes, os.PathLike], 
-        ion_dict_path: Union[str, bytes, os.PathLike],
-        token_dict_path: Union[str, bytes, os.PathLike],
-        yaml_dir_path: Union[str, bytes, os.PathLike],
-        mode: str,
-        **kwargs
-    ) -> None:
+    def __init__(self,
+                 model_path: Union[str, bytes, os.PathLike],
+                 ion_dict_path: Union[str, bytes, os.PathLike],
+                 token_dict_path: Union[str, bytes, os.PathLike],
+                 yaml_dir_path: Union[str, bytes, os.PathLike],
+                 mode: str,
+                 **kwargs
+                 ) -> None:
         super().__init__(
             ion_dict_path=ion_dict_path,
             token_dict_path=token_dict_path,
@@ -214,24 +242,25 @@ class TorchPE(TorchIntensityWrapper):
         )
 
         self.model = PeptideEncoderModel(
-            tokens = self.num_tokens,
-            final_units = len(self.ion_dict),
-            max_charge = self.max_charge,
-            kwargs = self.model_config
+            tokens=self.num_tokens,
+            final_units=len(self.ion_dict),
+            max_charge=self.max_charge,
+            kwargs=self.model_config
         )
         self.model.to(device)
         self.model.load_state_dict(th.load(model_path, map_location=device))
         self.model.eval()
 
+
 class TorchProsit(TorchIntensityWrapper):
-    def __init__(self, 
-        model_path: Union[str, bytes, os.PathLike], 
-        ion_dict_path: Union[str, bytes, os.PathLike],
-        token_dict_path: Union[str, bytes, os.PathLike],
-        yaml_dir_path: Union[str, bytes, os.PathLike],
-        mode: str,
-        **kwargs
-    ) -> None:
+    def __init__(self,
+                 model_path: Union[str, bytes, os.PathLike],
+                 ion_dict_path: Union[str, bytes, os.PathLike],
+                 token_dict_path: Union[str, bytes, os.PathLike],
+                 yaml_dir_path: Union[str, bytes, os.PathLike],
+                 mode: str,
+                 **kwargs
+                 ) -> None:
         super().__init__(
             ion_dict_path=ion_dict_path,
             token_dict_path=token_dict_path,
@@ -240,29 +269,30 @@ class TorchProsit(TorchIntensityWrapper):
         )
 
         self.model = PrositModel(
-            tokens = self.num_tokens,
-            final_units = len(self.ion_dict),
-            max_charge = self.max_charge,
-            kwargs = self.model_config
+            tokens=self.num_tokens,
+            final_units=len(self.ion_dict),
+            max_charge=self.max_charge,
+            kwargs=self.model_config
         )
         self.model.to(device)
         self.model.load_state_dict(th.load(model_path, map_location=device))
         self.model.eval()
 
+
 class KoinaWrapper(ModelWrapper):
     def __init__(
-        self, 
-        model_path: Union[str, bytes, os.PathLike], 
-        mode: str,
-        inputs_ignored: int=3,
-        **kwargs
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str,
+            inputs_ignored: int = 3,
+            **kwargs
     ) -> None:
 
         self.model = Koina(model_path)
         self.mode = mode
         self.inputs_ignored = inputs_ignored
 
-    def make_prediction(self, inputs: ndarray, silent: bool=True) -> ndarray:
+    def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
         # set mode = "rt" to enter retention time mode
         # inputs["sequences"] = [["W", "E"],[],[]]
         if self.mode == "rt":
@@ -337,7 +367,7 @@ class KoinaWrapper(ModelWrapper):
                     success = True
             if counter >= 5:
                 return np.zeros(len(inputs))
-            
+
             # Find the annotation/mode in the koina output
             results = {}
             missing_values = {}
@@ -346,7 +376,7 @@ class KoinaWrapper(ModelWrapper):
                 missing_values[mode] = 0
 
                 ann_bool = preds["annotation"] == bytes(mode, "utf-8")
-            
+
                 # If you don't find it, return 0 prediction
                 if len(preds[ann_bool]["intensities"]) < len(sequences):
                     if silent == False: print(preds)
@@ -355,26 +385,25 @@ class KoinaWrapper(ModelWrapper):
                             results[mode].append(0.0)
                             missing_values[mode] += 1
                         else:
-                           results[mode].append(preds[ann_bool]["intensities"][i])
+                            results[mode].append(preds[ann_bool]["intensities"][i])
                 else:
                     results[mode] = preds[ann_bool]["intensities"].to_list()
-                
+
                 assert len(results[mode]) == len(sequences)
-            
+
             return pd.DataFrame(results).to_numpy()
 
 
 class ChargeStateWrapper(ModelWrapper):
     def __init__(
-        self, 
-        model_path: Union[str, bytes, os.PathLike], 
-        mode: str
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str,
+            **kwargs
     ) -> None:
 
-        import ChargeState
-
         self.path = "./src/models/ChargeState/trained_model.keras"
-        if path:
+        if model_path:
             warnings.warn(
                 """
                             You have given a path even though this project provides a model already.
@@ -383,7 +412,9 @@ class ChargeStateWrapper(ModelWrapper):
                             """
             )
             self.path = model_path
-        self.mode = mode[-1]
+        self.mode = []
+        for charge in mode:
+            self.mode.append(int(charge[-1]))
 
         self.model = keras.saving.load_model(
             self.path,
@@ -399,8 +430,8 @@ class ChargeStateWrapper(ModelWrapper):
     def make_prediction(self, inputs: ndarray) -> ndarray:
 
         # inputs["sequences"] = [["W", "E"],[],[]]
-
-        # print(type(hx(inputs)["sequence"][0]))
+        #print("PRINTING HX INPUTS:")
+        #print(hx(inputs)["sequence"][0])
 
         sequences = []
         for seq in hx(inputs)["sequence"]:
@@ -413,9 +444,13 @@ class ChargeStateWrapper(ModelWrapper):
         input_df = pd.DataFrame()
         input_df["peptide_sequences"] = np.array(sequences)
 
+        #for s in input_df["peptide_sequences"]:
+        #    print(s)
+
         encoded_seqs, _ = to_dlomix(input_df)
 
-        return self.model.predict(encoded_seqs)[:, int(self.mode) - 1]
+        #print(self.model.predict(encoded_seqs)[:, self.mode].shape)
+        return self.model.predict(encoded_seqs)[:, self.mode]
 
 
 model_wrappers = {
