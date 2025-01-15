@@ -420,7 +420,7 @@ class ChargeStateWrapper(ModelWrapper):
             self.path = model_path
         self.mode = []
         for charge in mode:
-            self.mode.append(int(charge[-1]))
+            self.mode.append(int(charge[-1]) - 1)
 
         self.model = keras.saving.load_model(
             self.path,
@@ -477,7 +477,7 @@ class FlyabilityWrapper(ModelWrapper):
 
         self.mode = []
         for fly in mode:
-            self.mode.append(int(fly[-1]))
+            self.mode.append(int(fly[-1]) - 1)
         #self.batch_num = 0
 
     def make_prediction(self, inputs: ndarray) -> ndarray:
