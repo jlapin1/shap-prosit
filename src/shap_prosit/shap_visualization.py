@@ -694,7 +694,7 @@ class ShapVisualizationGeneral():
         df = pd.read_parquet(sv_path)
         self.charge = df["charge"].tolist()
         self.seq_list = df["sequence"].tolist()
-        self.shap_values_list = df["shap_values"].tolist()
+        self.shap_values_list = df[f"shap_values_{self.mode}"].tolist()
 
         # Initialize data structures
         self.count_positions = np.zeros((30))
@@ -1017,8 +1017,8 @@ if __name__ == "__main__":
     with open(sys.argv[1], encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
-    mode = config["shap_calculator"]["mode"]
-    if mode in {"rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
+    mode = config["shap_visualization"]["mode"]
+    if mode in {"rt", "cc", "fly1", "fly2", "fly3", "fly4", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"}:
         visualization = ShapVisualizationGeneral(
             config["shap_visualization"]["sv_path"], mode=mode
         )

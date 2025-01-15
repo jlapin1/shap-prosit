@@ -23,6 +23,8 @@ import yaml
 from numpy import ndarray
 
 import subprocess
+import requests
+import json
 
 
 def get_installed_packages():
@@ -295,7 +297,7 @@ class KoinaWrapper(ModelWrapper):
     def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
         # set mode = "rt" to enter retention time mode
         # inputs["sequences"] = [["W", "E"],[],[]]
-        if self.mode == "rt":
+        if self.mode == ["rt"]:
 
             print(type(hx(inputs)["sequence"][0]))
 
@@ -310,9 +312,12 @@ class KoinaWrapper(ModelWrapper):
             input_df = pd.DataFrame()
             input_df["peptide_sequences"] = np.array(sequences)
 
-            return (self.model.predict(input_df)["irt"]).to_numpy()
+            pred = (self.model.predict(input_df)["irt"]).to_numpy()
+            pred = np.expand_dims(pred, axis=1)
+            print(pred.shape)
+            return pred
 
-        elif self.mode == "cc":
+        elif self.mode == ["cc"]:
             # set mode = "cc" to enter retention time mode
             sequences = []
             for seq in hx(inputs)["sequence"]:
@@ -325,10 +330,11 @@ class KoinaWrapper(ModelWrapper):
             input_df = pd.DataFrame()
             input_df["peptide_sequences"] = np.array(sequences)
             input_df["precursor_charges"] = inputs[:, -1].astype("int")
-            print(input_df["peptide_sequences"])
-            print(input_df["precursor_charges"])
-            assert len(input_df.shape) == 2, f"shape is not 2-dimensional\n{input_df}"
-            return (self.model.predict(input_df)["ccs"]).to_numpy()
+
+            pred = (self.model.predict(input_df)["ccs"]).to_numpy()
+            pred = np.expand_dims(pred, axis=1)
+            return pred
+
 
         else:
             sequences = []
@@ -452,6 +458,67 @@ class ChargeStateWrapper(ModelWrapper):
         #print(self.model.predict(encoded_seqs)[:, self.mode].shape)
         return self.model.predict(encoded_seqs)[:, self.mode]
 
+class FlyabilityWrapper(ModelWrapper):
+
+    def __init__(
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str,
+            **kwargs
+    ) -> None:
+
+        if model_path:
+            warnings.warn(
+                """
+                            You have given a path even though this project provides a model already.
+                            No custom flyabilty models supported yet, using jesse's model...
+                """
+            )
+
+        self.mode = []
+        for fly in mode:
+            self.mode.append(int(fly[-1]))
+        #self.batch_num = 0
+
+    def make_prediction(self, inputs: ndarray) -> ndarray:
+
+        sequences = []
+        for seq in hx(inputs)["sequence"]:
+            try:
+                sequence = "".join(seq)
+            except:
+                sequence = b"".join(seq).decode("utf-8")
+            sequences.append(sequence)
+
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
+
+        data = f'''
+        {{
+            "id": "test",
+            "inputs": [
+                {{
+                    "name": "peptide_sequences",
+                    "datatype": "BYTES",
+                    "shape": {[len(sequences), 1]},
+                    "data": {json.dumps(sequences)}           
+                }}
+            ]
+        }}
+        '''
+        #print(data)
+        response = requests.post('http://10.157.98.63:8501/v2/models/pfly_2024/infer', headers=headers, data=data)
+        pred_dict = json.loads(response.text)
+        pred = np.array(pred_dict["outputs"][0]["data"]).reshape(pred_dict["outputs"][0]["shape"],)
+
+        #if self.batch_num % 100 == 0:
+        #    print(f"Processing Batch {self.batch_num}")
+        #self.batch_num += 1
+
+        return pred[:, self.mode]
+
+
 
 model_wrappers = {
     "prosit": PrositIntensityWrapper,
@@ -460,4 +527,5 @@ model_wrappers = {
     "torch_prosit": TorchProsit,
     "koina": KoinaWrapper,
     "charge": ChargeStateWrapper,
+    "flyability": FlyabilityWrapper,
 }

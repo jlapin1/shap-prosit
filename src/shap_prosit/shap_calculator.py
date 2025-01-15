@@ -19,6 +19,7 @@ class ShapCalculator:
         dset: pd.DataFrame,
         bgd: pd.DataFrame,
         model_wrapper: ModelWrapper,
+        batch_size: int = 1000,
         max_sequence_length: int = 30,
         max_charge: int = 6,
         inputs_ignored: int = 3,
@@ -29,10 +30,12 @@ class ShapCalculator:
         self.max_charge = max_charge
         self.model_wrapper = model_wrapper
         self.inputs_ignored = inputs_ignored
+        self.batch_size = batch_size
 
         self.bgd_size = bgd.shape[0]
 
-        if mode[0] in ["rt", "cc", "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
+        if mode[0] in ["rt", "cc", "fly1", "fly2", "fly3", "fly4",
+                       "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
             self.ext = 0
         else:
             self.ext = {ion: int(ion[1:].split("+")[0].split('^')[0]) for ion in mode}
@@ -125,7 +128,7 @@ class ShapCalculator:
 
     def score(self, peptide, mask=True):
         shape = peptide.shape
-        x_ = self.ens_pred(peptide, mask=mask)
+        x_ = self.ens_pred(peptide, self.batch_size, mask=mask)
         score = x_
         #if shape[0] == 1:
         #    score = np.array([score])[None, :]
@@ -162,7 +165,7 @@ class ShapCalculator:
         # Other outputs to save
         seq = list(input_orig.squeeze())
         seqrep = seq[:peptide_length]
-        original_intensity = self.ens_pred(inpvec, mask=False)
+        original_intensity = self.ens_pred(inpvec, self.batch_size, mask=False)
         too_short = False if self.ext == 0 else peptide_length <= np.array(list(self.ext.values()))
         # Identify impossible sequences by setting intensity to -1
         original_intensity[:, too_short] = -1
@@ -194,6 +197,7 @@ def save_shap_values(
     inputs_ignored: int = 3,
     dataset_queries: List[str] = None,
     bgd_queries: List[str] = None,
+    batch_size: int = 1000,
     **kwargs
 ):
     print("<<<ATTN>>> Starting calculation loop")
@@ -240,8 +244,9 @@ def save_shap_values(
     sc = ShapCalculator(
         mode, 
         val, 
-        bgd, 
+        bgd,
         model_wrapper=model_wrapper,
+        batch_size=batch_size,
         inputs_ignored=inputs_ignored,
     )
     
@@ -292,7 +297,7 @@ def save_shap_values(
                 else:
                     value.append(out_dict[key])
         
-        # Dump results every 1000 explanations to be safe
+        # Dump results every 100 explanations to be safe
         if (INDEX+1) % 100 == 0:
             pd.DataFrame(result).to_parquet(
                 output_path + "/output.parquet", compression="gzip"
