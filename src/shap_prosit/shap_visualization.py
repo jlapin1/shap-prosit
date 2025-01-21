@@ -927,19 +927,14 @@ class ShapVisualizationGeneral():
         plt.close("all")
 
         rel_pos_per_aa_shap = defaultdict(list)
-        rel_pos_per_aa_generic = defaultdict(list)
         for peptide, shap_values in zip(self.seq_list, self.shap_values_list):
-            # {amino_acid: (rel_pos between 0 & 1, shap_value)}
+
             peptide_len = len(peptide)
             for position, amino_acid in enumerate(peptide):
                 rel_pos = position/peptide_len
                 if rel_pos < 0 or rel_pos > 1:
                     print(rel_pos)
                 rel_pos_per_aa_shap[amino_acid].append((rel_pos, shap_values[position]))
-                # generic means either retention time or collisional cross-section
-                #tok = f"{amino_acid}_{position}"
-                #if tok in self.amino_acid_pos_generic:
-                #    rel_pos_per_aa_generic[amino_acid].append((rel_pos, self.amino_acid_pos_generic[tok]))
 
         rows = []
         for amino_acid, values in rel_pos_per_aa_shap.items():
@@ -947,17 +942,16 @@ class ShapVisualizationGeneral():
                 rows.append([amino_acid, pos, shap])
 
         bins = np.linspace(0, 1, 21)
-        print(bins)
+
         df = pd.DataFrame(rows, columns=["amino acid", "relative position", "shap value"])
         df['binned position'] = (
             pd.cut(df['relative position'], bins=bins, labels=np.round(bins[:-1], 2), include_lowest=True)
         )
-        print(df)
 
         heatmap_data = df.pivot_table(index='amino acid', columns='binned position', values='shap value',
                                       aggfunc='mean')
         plt.figure(figsize=(24, 16))
-        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, cbar_kws={'label': 'SHAP value'})
+        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, cbar_kws={'label': 'SHAP value'}, center=0)
         plt.title('Heatmap of SHAP Values by Amino Acid and Binned Relative Position')
 
         if save is not False:
