@@ -172,7 +172,7 @@ class ShapCalculator:
 
         shap_values = np.array(shap_values)
         if self.ext == 0:
-            shap_values = shap_values.reshape(1, -1, len(self.mode))
+            shap_values = np.transpose(shap_values, axes=(1, 2, 0))
 
         # TODO Find a dynamic way of including arbitrary number non-sequence items
 
