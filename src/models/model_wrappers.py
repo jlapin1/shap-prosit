@@ -25,7 +25,7 @@ from numpy import ndarray
 import subprocess
 import requests
 import json
-
+from copy import deepcopy
 
 def get_installed_packages():
     packages = []
@@ -118,39 +118,6 @@ class ModelWrapper(ABC):
         """Make prediction from input array containing
         sequences, precursor charges and collision energy."""
         pass
-
-
-class PrositIntensityWrapper(ModelWrapper):
-    def __init__(
-            self,
-            model_path: Union[str, bytes, os.PathLike],
-            mode: str
-    ) -> None:
-        self.ion_ind = annotations()[mode]
-        self.model = PrositIntensityPredictor(seq_length=30)
-        latest_checkpoint = tf.train.latest_checkpoint(model_path)
-        self.model.load_weights(latest_checkpoint)
-
-    def make_prediction(self, inputs: ndarray) -> ndarray:
-        return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
-
-
-class TransformerIntensityWrapper(ModelWrapper):
-    def __init__(
-            self,
-            model_path: Union[str, bytes, os.PathLike],
-            mode: str
-    ) -> None:
-        self.ion_ind = annotations()[mode]
-        with open(os.path.join(model_path, "model.yaml"), encoding="utf-8") as file:
-            model_config = yaml.safe_load(file)
-        self.model = TransformerModel(**model_config)
-        latest_checkpoint = tf.train.latest_checkpoint(path)
-        self.model.load_weights(latest_checkpoint)
-
-    def make_prediction(self, inputs: ndarray) -> ndarray:
-        return (self.model(hx(inputs), training=False)[:, self.ion_ind]).numpy()
-
 
 class TorchIntensityWrapper(ModelWrapper):
     def __init__(self,
@@ -286,11 +253,14 @@ class KoinaWrapper(ModelWrapper):
             self,
             model_path: Union[str, bytes, os.PathLike],
             mode: str,
+            server_url: Union[str, None]="koina.wilhelmlab.org:443",
+            ssl: bool=True,
             inputs_ignored: int = 3,
             **kwargs
     ) -> None:
-
-        self.model = Koina(model_path)
+        
+        server_url = "koina.wilhelmlab.org:443" if server_url == None else server_url
+        self.model = Koina(model_path, server_url=server_url, ssl=ssl)
         self.mode = mode
         self.inputs_ignored = inputs_ignored
 
@@ -399,6 +369,96 @@ class KoinaWrapper(ModelWrapper):
 
             return pd.DataFrame(results).to_numpy()
 
+class KoinaAC(KoinaWrapper):
+    def __init__(
+            self,
+            model_path: Union[str, bytes, os.PathLike],
+            mode: str,
+            server_url: Union[str, None]="koina.wilhelmlab.org:443",
+            ssl: bool=True,
+            inputs_ignored: int = 3,
+            **kwargs
+    ) -> None:
+        super().__init__(
+            model_path=model_path,
+            mode=mode,
+            server_url=server_url,
+            ssl=ssl,
+            inputs_ignored=inputs_ignored,
+            **kwargs
+        )
+    
+    def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
+        
+        bs, sl = inputs.shape
+        
+        # MUST make copy
+        # - If you change [] to '', it ruins the mask_pep blanks process
+        COPY = deepcopy(inputs).astype('U23')
+
+        sequences = []
+        # Add dashes to beginning and end
+        COPY[COPY=='[]'] = ''
+        for m in range(bs):
+            if 'UNIMOD' in COPY[m,0]:
+                COPY[m,0] += '-'
+        for i in COPY[:, :-self.inputs_ignored]:
+            try:
+                sequence = "".join(i)
+            except:
+                sequence = b"".join(i).decode("utf-8")
+            sequences.append(sequence)
+        # FIXME This always assumes charge is third to last and collision energy second
+        # to last (method is last). Need a dynamic way of finding these two features'
+        # positions.
+        input_dict = {
+            "peptide_sequences": np.array(sequences),
+            "precursor_charges": inputs[:, -3].astype("int"),
+            "collision_energies": (inputs[:, -2].astype("float")),
+            "fragmentation_types": np.array(list(map(lambda x: {'CID':1,'HCD':2}[x], inputs[:,-1]))).astype("int"),
+        }
+        counter = 0
+        success = False
+        while counter < 5 and not success:
+            try:
+                preds = self.model.predict(
+                    pd.DataFrame(input_dict), 
+                    min_intensity=-0.00001,
+                    disable_progress_bar=True,
+                )
+            except:
+                print(input_dict)
+                counter += 1
+                sleep(1)
+            else:
+                success = True
+        if counter >= 5:
+            return np.zeros(len(inputs))
+
+        # Find the annotation/mode in the koina output
+        results = {}
+        missing_values = {}
+        for mode in self.mode:
+            results[mode] = []
+            missing_values[mode] = 0
+
+            ann_bool = preds["annotation"] == bytes(mode, "utf-8")
+
+            # If you don't find it, return 0 prediction
+            if len(preds[ann_bool]["intensities"]) < len(sequences):
+                if silent == False: print(preds)
+                for i in range(len(sequences)):
+                    if i not in preds[ann_bool]["intensities"].index:
+                        results[mode].append(0.0)
+                        missing_values[mode] += 1
+                    else:
+                        results[mode].append(preds[ann_bool]["intensities"][i])
+            else:
+                results[mode] = preds[ann_bool]["intensities"].to_list()
+
+            assert len(results[mode]) == len(sequences)
+
+        return pd.DataFrame(results).to_numpy()
 
 class ChargeStateWrapper(ModelWrapper):
     def __init__(
@@ -521,11 +581,10 @@ class FlyabilityWrapper(ModelWrapper):
 
 
 model_wrappers = {
-    "prosit": PrositIntensityWrapper,
-    "transformer": TransformerIntensityWrapper,
     "torch_pe": TorchPE,
     "torch_prosit": TorchProsit,
     "koina": KoinaWrapper,
+    "koina_ac": KoinaAC,
     "charge": ChargeStateWrapper,
     "flyability": FlyabilityWrapper,
 }

@@ -1,52 +1,47 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
-    output_dir: prosit_uvpd
+    val_data_path: "/cmnfs/home/j.lapin/projects/shap-prosit/data/prosit_ac_inputs.parquet"
+    output_dir: prosit_ac
     mode:
-      - a7
-      - A7
-      - b7
-      - y7
-      #- c7
-      - C7
-      - z7
-      #- Z7
-      #- x7
-      #- X7
-      - a7^2
-      - A7^2
-      - b7^2
-      - y7^2
-      #- c7^2
-      - C7^2
-      - z7^2
-      #- Z7^2
-      #- x7^2
-      #- X7^2
+      - b5+1
+      - y5+1
+      - b7+1
+      - y7+1
+      - b5+2
+      - y5+2
+      - b7+2
+      - y7+2
     bgd_loc_path: # Path or leave empty to generate and save new permutation
     base_samp: 200
     extra_samp: [20, 500]
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore in input vector
     dataset_queries:
-      - "method == 'UVPD'"
-      - "peptide_length > 7"
+      #- "method == 'UVPD'"
+      #- "peptide_length > 7"
+      #- "modified_sequence.str.contains('121') == False"
+      - 'index % 100 == 0'
     bgd_queries:
       - "peptide_length > 7"
   
   # Reconstituting a saved torch model
   model_settings:
-    model_type: torch_prosit
-    model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945" # "Prosit_2019_intensity"
-    ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/filtered_ion_dict.csv"
-    token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
-    yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
+    model_type: koina_ac
+    koina:
+      model_path: Prosit_2024_intensity_PTMs_ac
+      server_url: '10.162.163.66:9500'
+      ssl: False
+    local:
+      model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945" # "Prosit_2019_intensity"
+      ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/filtered_ion_dict.csv"
+      token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
+      yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
-  mode: y3+1
-  sv_path: "multi_koina_output/output.parquet"
-  out_path: multi_koina_output/y3+1
+  mode: y5+1
+  sv_path: "prosit_ac/output.parquet"
+  out_path: multi_koina_output/y5+1
   filter_expr:
   clustering:
     run: False

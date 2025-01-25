@@ -23,6 +23,7 @@ class ShapCalculator:
         max_sequence_length: int = 30,
         max_charge: int = 6,
         inputs_ignored: int = 3,
+        blank_token: str = '',
     ):
         self.val = dset
         self.bgd = bgd
@@ -31,6 +32,7 @@ class ShapCalculator:
         self.model_wrapper = model_wrapper
         self.inputs_ignored = inputs_ignored
         self.batch_size = batch_size
+        self.blank_token = blank_token
 
         self.bgd_size = bgd.shape[0]
 
@@ -48,11 +50,11 @@ class ShapCalculator:
     def mask_pep(self, zs, pep, bgd_inds, mask=True) -> NDArray:
         BS, SL = zs.shape
         """
-        With out specifying the data type, np.array(SL*['']) is automatically initialized
+        With out specifying the data type, np.array(SL*[blank]) is automatically initialized
         as dtype 'U1'. This array dtype silently truncated strings down to their first
         character, which was an issue for modified amino acid strings.
         """
-        out = np.tile(np.array(SL*[''], dtype='U12')[None], [BS,1])
+        out = np.tile(np.array(SL*[self.blank_token], dtype='U23')[None], [BS,1])
         if mask:
             
             ## Collect all peptide tokens that are 'on' and place them in the out tensor
@@ -66,10 +68,10 @@ class ShapCalculator:
                 bgd_ = self.bgd[bgd_inds] # background dataset from batch_indices
                 out[zeroinds] = bgd_[zeroinds]
             
-            # pad c terminus with b''
-            inds2 = (out=='').argmax(1)
+            # pad c terminus with blanks
+            inds2 = (out==self.blank_token).argmax(1)
             blanks = np.tile(np.arange(self.max_len)[None], [BS, 1]) >= inds2[:, None]
-            out[:,:self.max_len][blanks] = ''
+            out[:,:self.max_len][blanks] = self.blank_token
             
             # TODO: Consider randomly elongating peptides if bgd example is longer
             # TODO: Consider randomly turning truncated peptides into tryptic peptides
@@ -142,7 +144,7 @@ class ShapCalculator:
 
         # Peptide length for the current peptide
         num_ignored = self.inputs_ignored
-        peptide_length = sum(input_orig[0, :-num_ignored] != '')
+        peptide_length = sum(input_orig[0, :-num_ignored] != self.blank_token)
         shap_vector_length = peptide_length + num_ignored
 
         # Input coalition vector: All aa's on (1) + charge + eV
@@ -240,6 +242,8 @@ def save_shap_values(
     np.savetxt(output_path + "/val_loc_indices.txt", remaining_indices, fmt='%d')
     bgd = np.stack(bgd['full'])
     val = np.stack(val_data.loc[remaining_indices]['full'])
+    
+    max_sequence_length = val.shape[1] - inputs_ignored
 
     sc = ShapCalculator(
         mode, 
@@ -248,6 +252,7 @@ def save_shap_values(
         model_wrapper=model_wrapper,
         batch_size=batch_size,
         inputs_ignored=inputs_ignored,
+        max_sequence_length=max_sequence_length,
     )
     
     bgd_mean = pd.Series(sc.fnull, index=sc.mode)
@@ -255,6 +260,7 @@ def save_shap_values(
     # TODO arbitrary number of non-sequence items
     result = {
         "sequence": [],
+        #"peptide_length": [],
         "energy": [],
         "charge": [],
         "method": [],
@@ -271,7 +277,7 @@ def save_shap_values(
         
         # Set sampling amount
         if extra_samp is not None:
-            explain_length = sum(sequence.squeeze()[:-inputs_ignored] != '')
+            explain_length = sum(sequence.squeeze()[:-inputs_ignored] != sc.blank_token)
             if explain_length >= extra_samp[0]:
                 Samp = extra_samp[1]
             else:
@@ -281,7 +287,9 @@ def save_shap_values(
 
         # Calculate shapley values
         out_dict = sc.calc_shap_values(sequence, samp=Samp)
-        
+        # add to out_dict to include in output
+        out_dict['peptide_length'] = val_data['peptide_length'].iloc[INDEX]
+
         # Save results
         if out_dict != False:
             for key, value in result.items():
@@ -320,9 +328,10 @@ if __name__ == "__main__":
     os.system(f"cp config.yaml {output_dir}/")
     
     # Model
+    model_type = 'koina' if 'koina' in config['model_settings']['model_type'] else 'local'
     model_wrapper = model_wrappers[config['model_settings']["model_type"]](
         mode=config['shap_settings']["mode"],
-        **config['model_settings'],
+        **config['model_settings'][model_type],
     )
     
     # SHAP calculation
