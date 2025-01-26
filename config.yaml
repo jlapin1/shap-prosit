@@ -2,7 +2,7 @@ shap_calculator:
   # SHAP calculation settings
   shap_settings:
     val_data_path: "/cmnfs/home/j.lapin/projects/shap-prosit/data/prosit_ac_inputs.parquet"
-    output_dir: prosit_ac
+    output_dir: prosit_ac_99
     mode:
       - b5+1
       - y5+1
@@ -12,16 +12,14 @@ shap_calculator:
       - y5+2
       - b7+2
       - y7+2
-    bgd_loc_path: # Path or leave empty to generate and save new permutation
+    bgd_loc_path: prosit_ac_100/bgd_loc_indices.txt # Path or leave empty to generate and save new permutation
     base_samp: 200
     extra_samp: [20, 500]
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore in input vector
     dataset_queries:
-      #- "method == 'UVPD'"
-      #- "peptide_length > 7"
-      #- "modified_sequence.str.contains('121') == False"
-      - 'index % 100 == 0'
+      - 'index % 99 == 0'
+      - "modified_sequence.str.contains('UNIMOD')"
     bgd_queries:
       - "peptide_length > 7"
   
@@ -39,9 +37,9 @@ shap_calculator:
       yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
-  mode: y5+1
-  sv_path: "prosit_ac/output.parquet"
-  out_path: multi_koina_output/y5+1
+  mode: y7+1
+  sv_path: "combined_df.parquet"
+  out_path: y7+1
   filter_expr:
   clustering:
     run: False

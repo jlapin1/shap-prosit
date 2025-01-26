@@ -204,9 +204,17 @@ def save_shap_values(
 ):
     print("<<<ATTN>>> Starting calculation loop")
 
-    # Load and query data
+    # Load data
     val_data = pd.read_parquet(val_data_path)
     original_size = val_data.shape[0]
+
+    # Load existing split BEFORE querying dataset
+    if bgd_loc_path is not None:
+        print("<<<ATTN>>> Loading existing bgd split")
+        loc_inds = np.loadtxt(bgd_loc_path).astype(int)
+        bgd = val_data.loc[loc_inds]
+    
+    # Query dataset
     if dataset_queries is not None:
         query_expression = " and ".join(dataset_queries)
         print(f"<<<ATTN>>> Querying dataset of size {original_size} with expression: '{query_expression}'")
@@ -217,15 +225,8 @@ def save_shap_values(
             print("<<<ATTN>>> WARNING query didn't do anything, or it did too much")
         print(val_data)
     
-    # Split dataset into background and validation.
-    # Existing split
-    if bgd_loc_path is not None:
-        print("<<<ATTN>>> Loading existing bgd split")
-        loc_inds = np.loadtxt(bgd_loc_path).astype(int)
-        bgd = val_data.loc[loc_inds]
-    
-    # Must create a new split
-    else:
+    # Create a new split (if not loading existing)
+    if bgd_loc_path is None:
         print("<<<ATTN>>> Creating new bgd split")
         if bgd_queries is not None:
             query_expression = " and ".join(bgd_queries)
@@ -235,14 +236,24 @@ def save_shap_values(
             bgd = val_data
         bgd = bgd.sample(bgd_size)
     
+    # Save splits
     bgd_indices = bgd.index.values.tolist()
     np.savetxt(output_path + "/bgd_loc_indices.txt", bgd_indices, fmt="%d")
     remaining_indices = val_data.index.values.tolist()
-    for index in bgd_indices: remaining_indices.remove(index)
+    for index in bgd_indices: 
+        try:
+            remaining_indices.remove(index)
+        except:
+            # This can happen if you load an existing bgd split, but querying
+            # the dataset get rid of those bgd loc indices
+            pass
     np.savetxt(output_path + "/val_loc_indices.txt", remaining_indices, fmt='%d')
+    
+    # Convert full column to numpy arrays
     bgd = np.stack(bgd['full'])
     val = np.stack(val_data.loc[remaining_indices]['full'])
     
+    # NOTE: sequence length can be different than peptide length
     max_sequence_length = val.shape[1] - inputs_ignored
 
     sc = ShapCalculator(

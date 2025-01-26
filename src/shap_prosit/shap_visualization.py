@@ -26,6 +26,13 @@ ion_extent = lambda string: int(string[1:].split('+')[0].split('^')[0])
 
 reverse_ion_list = ["x", "X", "y", "z", "Z"]
 
+amino_acid_list = list("AVILMFYWSTNQCUGPRHKDEU")
+
+def contains_amino_acid(token):
+    # remove modiffication, if necessary
+    token_ = re.sub(r"\[UNIMOD:[0-9]{1,3}]", '', token)
+    return True if token_ in amino_acid_list else False
+
 class ShapVisualizationIntensity:
     def __init__(
         self,
@@ -33,7 +40,9 @@ class ShapVisualizationIntensity:
         ion: str,
         position_combos: list | None = None,
         filter_expr: str = None,
+        maximum_sequence_length: int = 30,
     ) -> None:
+        self.maximum_sequence_length = maximum_sequence_length
         if position_combos is None:
             self.position_combos = [
                 [0, -1],
@@ -44,7 +53,7 @@ class ShapVisualizationIntensity:
             self.position_combos = position_combos
         df = pd.read_parquet(sv_path)
         df["sequence_length"] = np.vectorize(len)(df["sequence"])
-        
+
         # Grab only the intensity and shap column for the ion of interest
         int_col = f"intensity_{ion}"
         assert int_col in df.columns, f"Available columns {df.columns}"
@@ -71,9 +80,9 @@ class ShapVisualizationIntensity:
         self.bgd_mean = df["bgd_mean"].tolist()[0]
 
         # Initialize data structures
-        self.count_positions = np.zeros((30))
-        self.sv_sum = np.zeros((30))
-        self.sv_abs_sum = np.zeros((30))
+        self.count_positions = np.zeros((maximum_sequence_length))
+        self.sv_sum = np.zeros((maximum_sequence_length))
+        self.sv_abs_sum = np.zeros((maximum_sequence_length))
         self.combo_pos_sv_sum = []
         self.combo_pos_sv_abs_sum = []
         self.combo_inten = []
@@ -87,11 +96,18 @@ class ShapVisualizationIntensity:
             seq = np.array(sequence)
             sv = np.array(shap_values)
             inten = intensity
-
+            
+            # aa_position has number amino acid at every position, which will not
+            # be equal to absolute position if non-amino acid tokens exist
+            hold = np.array(list(map(contains_amino_acid, seq)))
+            aa_position = np.maximum(np.cumsum(hold) - 1, 0)
+            aa_max_pos = aa_position.max() + 1
+            token_position = np.arange(len(seq))
             le = len(seq)
-            self.count_positions += np.append(np.ones((le)), np.zeros((30 - le)))
+            self.count_positions += np.append(np.ones((le)), np.zeros((maximum_sequence_length - le)))
 
             # Gather sum and abs sum of SV in each position
+            # FIXME Position plot no longer works with tokens that lack amino acids
             if self.ion[0] in reverse_ion_list:  # Reverse string for y-ion
                 self.sv_sum[:le] += sv[::-1]
                 self.sv_abs_sum[:le] += abs(sv[::-1])
@@ -101,7 +117,7 @@ class ShapVisualizationIntensity:
 
             self.__bi_token_combo(seq, sv, inten)
 
-            for i, (am_ac, sh_value) in enumerate(zip(seq, sv)):
+            for i, (am_ac, aa_pos, sh_value) in enumerate(zip(seq, aa_position, sv)):
 
                 # Store SV for each AA
                 if am_ac not in self.amino_acids_sv:
@@ -112,9 +128,9 @@ class ShapVisualizationIntensity:
                 # 0 is the first index in ion, positives are inside ion
                 # negatives are outside of ion
                 tok_c = (
-                    f"{am_ac}_{i + ion_extent(self.ion) - le}"
+                    f"{am_ac}_{aa_pos + ion_extent(self.ion) - aa_max_pos}"
                     if self.ion[0] in reverse_ion_list
-                    else f"{am_ac}_{ion_extent(self.ion) - i - 1}"
+                    else f"{am_ac}_{ion_extent(self.ion) - aa_pos - 1}"
                 )
 
                 # Check if token already in dictionary

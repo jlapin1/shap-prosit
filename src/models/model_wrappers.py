@@ -70,6 +70,12 @@ if 'dlomix' in installed_packages:
     import keras
     import tensorflow as tf
 
+amino_acid_list = list("AVILMFYWSTNQCUGPRHKDEU")
+def contains_amino_acid(token):
+    
+    # remove modiffication, if necessary
+    token_ = re.sub(r"\[UNIMOD:[0-9]{1,3}]", '', token)
+    return True if token_ in amino_acid_list else False
 
 def hx(tokens):
     sequence = tokens[:, :-3]
@@ -400,7 +406,7 @@ class KoinaAC(KoinaWrapper):
         # Add dashes to beginning and end
         COPY[COPY=='[]'] = ''
         for m in range(bs):
-            if 'UNIMOD' in COPY[m,0]:
+            if contains_amino_acid(COPY[m,0]) == False:
                 COPY[m,0] += '-'
         for i in COPY[:, :-self.inputs_ignored]:
             try:
