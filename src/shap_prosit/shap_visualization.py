@@ -90,6 +90,18 @@ class ShapVisualizationIntensity:
         self.amino_acid_pos = {}
         self.amino_acid_pos_inten = {}
 
+        dataframe = {
+            'original': [], 
+            'abbreviated': [],
+            'token': [],
+            'amino_acid': [],
+            'position': [],
+            'modification': [],
+            'shap_values': [],
+            'intensities': [],
+        }
+        list_index = {}
+
         for sequence, shap_values, intensity in zip(
             self.seq_list, self.shap_values_list, self.pred_intensities
         ):
@@ -118,19 +130,48 @@ class ShapVisualizationIntensity:
             self.__bi_token_combo(seq, sv, inten)
 
             for i, (am_ac, aa_pos, sh_value) in enumerate(zip(seq, aa_position, sv)):
+                
+                relative_position = (
+                    aa_pos + ion_extent(self.ion) - aa_max_pos
+                    if self.ion[0] in reverse_ion_list else
+                    ion_extent(self.ion) - aa_pos - 1
+                )
+                
+                abbr = re.sub("\[UNIMOD:|\]", "", am_ac)
+                token = f"{abbr}_{relative_position}"
 
+                if token not in dataframe['token']:
+                    dataframe['original'].append(am_ac)
+                    dataframe['abbreviated'].append(abbr)
+                    dataframe['token'].append(token)
+                    AA = re.sub(r"\[UNIMOD:[0-9]{1,3}|\]", "", am_ac)
+                    dataframe['amino_acid'].append(AA)
+                    dataframe['position'].append(relative_position)
+                    mod_number = re.sub(r"[A-Z]|\[UNIMOD:|\]", "", am_ac)
+                    mod_number = int(mod_number) if mod_number != '' else -1
+                    dataframe['modification'].append(mod_number)
+                    lind = len(dataframe['shap_values'])
+                    list_index[token] = lind
+                    dataframe['shap_values'].append([])
+                    dataframe['intensities'].append([])
+                dataframe['shap_values'][list_index[token]].append(sh_value)
+                dataframe['intensities'][list_index[token]].append(inten)
+
+                # Replace {A}[UNIMOD:{#}] with {A}{#}
+                am_ac_ = re.sub("\[UNIMOD:|\]", "", am_ac)
+                
                 # Store SV for each AA
-                if am_ac not in self.amino_acids_sv:
-                    self.amino_acids_sv[am_ac] = []
-                self.amino_acids_sv[am_ac].append(sh_value)
+                if am_ac_ not in self.amino_acids_sv:
+                    self.amino_acids_sv[am_ac_] = []
+                self.amino_acids_sv[am_ac_].append(sh_value)
 
                 # Create token for AA and position
                 # 0 is the first index in ion, positives are inside ion
                 # negatives are outside of ion
                 tok_c = (
-                    f"{am_ac}_{aa_pos + ion_extent(self.ion) - aa_max_pos}"
+                    f"{am_ac_}_{aa_pos + ion_extent(self.ion) - aa_max_pos}"
                     if self.ion[0] in reverse_ion_list
-                    else f"{am_ac}_{ion_extent(self.ion) - aa_pos - 1}"
+                    else f"{am_ac_}_{ion_extent(self.ion) - aa_pos - 1}"
                 )
 
                 # Check if token already in dictionary
@@ -143,6 +184,14 @@ class ShapVisualizationIntensity:
                 self.amino_acid_pos[tok_c].append(sh_value)
                 self.amino_acid_pos_inten[tok_c].append(inten)
         
+        hold = pd.DataFrame(dataframe).set_index('token')
+        hold['occurs'] = hold.apply(lambda x: len(x['shap_values']), axis=1)
+        hold['sv_mean'] = hold.apply(lambda x: np.mean(x['shap_values']), axis=1)
+        hold['sv_abs_mean'] = hold.apply(lambda x: np.mean(np.abs(x['shap_values'])), axis=1)
+        hold['sv_std'] = hold.apply(lambda x: np.std(x['shap_values']), axis=1)
+        hold['int_mean'] = hold.apply(lambda x: np.mean(x['intensities']), axis=1)
+        self.tokenframe = hold
+
         # This includes all tokens
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
         # This excludes modification-only tokens (N-term)
@@ -326,31 +375,44 @@ class ShapVisualizationIntensity:
 
         axes[0].set_title("Mean absolute shapley values for ion " + self.ion)
         axes[0].set_xlim([-0.5, 19.5])
-        axes[0].plot(list(self.amino_acids_abs_avg_sv.values()), "ro")
+        sorted_aas = sorted(self.tokenframe.query("amino_acid != ''")['abbreviated'].unique())
+        meanabs = [
+            np.mean([abs(m) for n in self.tokenframe.query(f"abbreviated == '{aa}'")['shap_values'].tolist() for m in n])
+            for aa in sorted_aas
+        ]
+        axes[0].plot(meanabs, "ro")
         im = axes[1].imshow(
-            np.array(list(self.amino_acids_abs_avg_sv.values()))[None],
+            np.array(meanabs)[None],
             cmap="RdBu_r",
             norm=TwoSlopeNorm(0),
         )
         axes[2].set_title("Mean shapley values for ion " + self.ion)
+        mean = [
+            np.mean([m for n in self.tokenframe.query(f"abbreviated == '{aa}'")['shap_values'].tolist() for m in n])
+            for aa in sorted_aas
+        ]
+        std = [
+            np.std([m for n in self.tokenframe.query(f"abbreviated == '{aa}'")['shap_values'].tolist() for m in n])
+            for aa in sorted_aas
+        ]
         axes[2].errorbar(
-            np.arange(len(self.amino_acids_sorted)),
-            np.array(list(self.amino_acids_avg_sv.values())),
-            np.array(list(self.amino_acids_std_sv.values())),
+            np.arange(len(sorted_aas)),
+            np.array(mean),
+            np.array(std),
             marker="o",
             linestyle="none",
             markerfacecolor="red",
             markersize=10,
         )
         im2 = axes[3].imshow(
-            np.array(list(self.amino_acids_avg_sv.values()))[None],
+            np.array(mean)[None],
             cmap="RdBu_r",
             norm=TwoSlopeNorm(0),
         )
         axes[3].set_xlim([-0.5, 19.5])
         for ax in axes:
-            ax.set_xticks(np.arange(len(self.amino_acids_sorted)))
-            ax.set_xticklabels(self.amino_acids_sorted, size=8)
+            ax.set_xticks(np.arange(len(sorted_aas)))
+            ax.set_xticklabels(sorted_aas, size=8)
         for ax in axes[[1, 3]]:
             ax.set_yticks([])
             ax.set_yticklabels([])
@@ -367,12 +429,21 @@ class ShapVisualizationIntensity:
         fig.set_figheight(5)
         fig.set_figwidth(15)
         axes[0].set_title("Mean absolute shapley values for ion " + self.ion)
-        im = axes[0].imshow(self.sv_abs_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        Range = np.arange(self.tokenframe['position'].min(), self.tokenframe['position'].max()+1, 1)
+        meanabs = np.array([
+            np.mean([abs(m) for n in self.tokenframe.query(f"position == {pos}")['shap_values'].tolist() for m in n])
+            for pos in Range
+        ])
+        im = axes[0].imshow(meanabs[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
         axes[1].set_title("Mean shapley values for ion " + self.ion)
-        im2 = axes[1].imshow(self.sv_avg[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
+        mean = np.array([
+            np.mean([m for n in self.tokenframe.query(f"position == {pos}")['shap_values'].tolist() for m in n])
+            for pos in Range
+        ])
+        im2 = axes[1].imshow(mean[None], cmap="RdBu_r", norm=TwoSlopeNorm(0))
         tick_range = np.arange(
             ion_extent(self.ion) - 1,
-            -1 * (30 - ion_extent(self.ion) + 1),
+            -1 * (self.maximum_sequence_length - ion_extent(self.ion) + 1),
             -1,
         )
         for ax in axes:
@@ -381,7 +452,7 @@ class ShapVisualizationIntensity:
             )
             ax.set_yticks([])
             ax.set_yticklabels([])
-            ax.set_xticks(np.arange(30))
+            ax.set_xticks(np.arange(self.maximum_sequence_length))
             ax.set_xticklabels(tick_range, size=6)
         fig.colorbar(im).ax.set_yscale("linear")
         fig.colorbar(im2).ax.set_yscale("linear")
@@ -393,22 +464,28 @@ class ShapVisualizationIntensity:
     def position_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
         
-        amino_acids = (
+        amino_acids_ = (
             self.amino_acids_sorted if all_tokens else self.amino_acids_sorted_
         )
 
-        heatmap_int = np.zeros((len(amino_acids), 30))
-        heatmap = np.zeros((len(amino_acids), 30))
-        heatmap_abs = np.zeros((len(amino_acids), 30))
+        amino_acids = sorted(
+            self.tokenframe['abbreviated'].unique()
+            if all_tokens else
+            self.tokenframe.query("amino_acid != ''")['abbreviated'].unique()
+        )
+
+        heatmap_int = np.zeros((len(amino_acids), self.maximum_sequence_length))
+        heatmap = np.zeros((len(amino_acids), self.maximum_sequence_length))
+        heatmap_abs = np.zeros((len(amino_acids), self.maximum_sequence_length))
         
         for A, a in enumerate(amino_acids):
-            for b in np.arange(30):
+            for b in np.arange(self.maximum_sequence_length):
                 tok = "%s_%d" % (a, -1 * (b + 1 - ion_extent(self.ion)))
-                if tok in self.amino_acid_pos_mean_inten:
-                    heatmap_int[A, b] = self.amino_acid_pos_mean_inten[tok]
-                if tok in self.amino_acid_pos_abs_avg:
-                    heatmap[A, b] = self.amino_acid_pos_avg[tok]
-                    heatmap_abs[A, b] = self.amino_acid_pos_abs_avg[tok]
+                if tok in self.tokenframe.index:
+                    if self.tokenframe.loc[tok]['occurs'] > MIN_OCCUR_HEAT:
+                        heatmap_int[A, b] = self.tokenframe.loc[tok]['int_mean']
+                        heatmap[A, b] = self.tokenframe.loc[tok]['sv_mean']
+                        heatmap_abs[A, b] = self.tokenframe.loc[tok]['sv_abs_mean']#amino_acid_pos_abs_avg[tok]
 
         fig, axes = plt.subplots(3)
         fig.set_figheight(15)
@@ -422,7 +499,7 @@ class ShapVisualizationIntensity:
 
         tick_range = np.arange(
             ion_extent(self.ion) - 1,
-            -1 * (30 - ion_extent(self.ion) + 1),
+            -1 * (self.maximum_sequence_length - ion_extent(self.ion) + 1),
             -1,
         )
         for ax in axes:
@@ -431,7 +508,7 @@ class ShapVisualizationIntensity:
             )
             ax.set_yticks(np.arange(len(amino_acids)))
             ax.set_yticklabels(amino_acids, size=6)
-            ax.set_xticks(np.arange(30))
+            ax.set_xticks(np.arange(self.maximum_sequence_length))
             ax.set_xticklabels(tick_range, size=6)
         fig.colorbar(im).ax.set_yscale("linear")
         fig.colorbar(im2).ax.set_yscale("linear")
