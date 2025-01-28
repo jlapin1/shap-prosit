@@ -78,7 +78,11 @@ class ShapVisualizationIntensity:
         self.seq_list = df["sequence"].tolist()
         self.shap_values_list = df["shap_values"].tolist()
         self.bgd_mean = df["bgd_mean"].tolist()[0]
-
+        
+        ##################
+        # OLD CODE START #
+        ##################
+        """
         # Initialize data structures
         self.count_positions = np.zeros((maximum_sequence_length))
         self.sv_sum = np.zeros((maximum_sequence_length))
@@ -89,6 +93,10 @@ class ShapVisualizationIntensity:
         self.amino_acids_sv = {}
         self.amino_acid_pos = {}
         self.amino_acid_pos_inten = {}
+        """
+        ################
+        # OLD CODE END #
+        ################
 
         dataframe = {
             'original': [], 
@@ -114,10 +122,14 @@ class ShapVisualizationIntensity:
             hold = np.array(list(map(contains_amino_acid, seq)))
             aa_position = np.maximum(np.cumsum(hold) - 1, 0)
             aa_max_pos = aa_position.max() + 1
-            token_position = np.arange(len(seq))
-            le = len(seq)
-            self.count_positions += np.append(np.ones((le)), np.zeros((maximum_sequence_length - le)))
-
+            #token_position = np.arange(len(seq))
+            #le = len(seq)
+            #self.count_positions += np.append(np.ones((le)), np.zeros((maximum_sequence_length - le)))
+            
+            ##################
+            # OLD CODE START #
+            ##################
+            """
             # Gather sum and abs sum of SV in each position
             # FIXME Position plot no longer works with tokens that lack amino acids
             if self.ion[0] in reverse_ion_list:  # Reverse string for y-ion
@@ -128,6 +140,10 @@ class ShapVisualizationIntensity:
                 self.sv_abs_sum[:le] += abs(sv)
 
             self.__bi_token_combo(seq, sv, inten)
+            """
+            ################
+            # OLD CODE END #
+            ################
 
             for i, (am_ac, aa_pos, sh_value) in enumerate(zip(seq, aa_position, sv)):
                 
@@ -156,7 +172,11 @@ class ShapVisualizationIntensity:
                     dataframe['intensities'].append([])
                 dataframe['shap_values'][list_index[token]].append(sh_value)
                 dataframe['intensities'][list_index[token]].append(inten)
-
+                
+                ##################
+                # OLD CODE START #
+                ##################
+                """
                 # Replace {A}[UNIMOD:{#}] with {A}{#}
                 am_ac_ = re.sub("\[UNIMOD:|\]", "", am_ac)
                 
@@ -183,6 +203,10 @@ class ShapVisualizationIntensity:
                 # Store values for token in list
                 self.amino_acid_pos[tok_c].append(sh_value)
                 self.amino_acid_pos_inten[tok_c].append(inten)
+                """
+                ################
+                # OLD CODE END #
+                ################
         
         hold = pd.DataFrame(dataframe).set_index('token')
         hold['occurs'] = hold.apply(lambda x: len(x['shap_values']), axis=1)
@@ -191,7 +215,11 @@ class ShapVisualizationIntensity:
         hold['sv_std'] = hold.apply(lambda x: np.std(x['shap_values']), axis=1)
         hold['int_mean'] = hold.apply(lambda x: np.mean(x['intensities']), axis=1)
         self.tokenframe = hold
-
+        
+        ##################
+        # OLD CODE START #
+        ##################
+        """
         # This includes all tokens
         self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
         # This excludes modification-only tokens (N-term)
@@ -232,7 +260,12 @@ class ShapVisualizationIntensity:
             for tok in self.amino_acid_pos.keys()
             if len(self.amino_acid_pos[tok]) > MIN_OCCUR_HEAT
         }
-
+        """
+        ################
+        # OLD CODE END #
+        ################
+    
+    """
     def __bi_token_combo(self, sequence, shap_values, intensity):
         for i, combo in enumerate(self.position_combos):
             # Append new dictionary
@@ -270,7 +303,9 @@ class ShapVisualizationIntensity:
                 abs(sv[combo_pos[0]]) + abs(sv[combo_pos[1]])
             )
             self.combo_inten[i][tok].append(intensity)
-
+    """
+    
+    """
     def clustering(self, config: dict):
         number_of_aas = config["clustering"]["number_of_aa"]
         if config["clustering"]["from_which_end"] == "left":
@@ -366,6 +401,7 @@ class ShapVisualizationIntensity:
                 save=str(Path(config["sv_path"]).parent.absolute())
                 + f"/cluster_{cluster}"
             )
+    """
 
     def aa_only_plot(self, save=False):
         plt.close("all")
@@ -464,10 +500,6 @@ class ShapVisualizationIntensity:
     def position_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
         
-        amino_acids_ = (
-            self.amino_acids_sorted if all_tokens else self.amino_acids_sorted_
-        )
-
         amino_acids = sorted(
             self.tokenframe['abbreviated'].unique()
             if all_tokens else
@@ -517,7 +549,8 @@ class ShapVisualizationIntensity:
             plt.savefig(os.path.join(save, "position_heatmap.png"), bbox_inches="tight")
         else:
             plt.show()
-
+    
+    """
     def aa_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
         
@@ -573,23 +606,42 @@ class ShapVisualizationIntensity:
             plt.savefig(os.path.join(save, "aa_heatmap.png"), bbox_inches="tight")
         else:
             plt.show()
+    """
 
     def swarmplot(self, save=False):
         plt.close("all")
         fig, ax = plt.subplots()
         fig.set_figwidth(15)
         fig.set_figheight(8)
-
+        
         data = {"shap_value": [], "amino_acid": [], "inside_ion": []}
-        for key, values in self.amino_acid_pos.items():
-            inside = True if int(key.split('_')[1]) >= 0 else False
-            data["shap_value"].extend(values)
-            data["amino_acid"].extend([key.split('_')[0]] * len(values))
-            data["inside_ion"].extend([inside] * len(values))
+        sorted_aas = sorted(self.tokenframe.query("amino_acid != ''")['abbreviated'].unique())
+        for aaa in sorted_aas:
+            total_occurs = self.tokenframe.query(f'abbreviated == "{aaa}"')['occurs'].sum()
+            shap_values = [
+                m for n in self.tokenframe.query(f'abbreviated == "{aaa}"')['shap_values'] 
+                for m in n
+            ]
+            inside = [
+                m for n in [
+                    o['occurs']*[o['position']>=0] for _,o in 
+                    self.tokenframe.query(f'abbreviated == "{aaa}"')[['position','occurs']].iterrows()
+                ] 
+                for m in n
+            ]
+            amino_acids = total_occurs * [aaa]
+            
+            # Permute so that order doesn't matter as colors cover each other up
+            perm = np.random.permutation(np.array([shap_values, amino_acids, inside]).T)
+            [shap_values, amino_acids, inside] = np.split(perm, 3, 1)
+            
+            data['shap_value'].extend(shap_values.astype(np.float32).squeeze().tolist())
+            data['amino_acid'].extend(amino_acids.squeeze().tolist())
+            data['inside_ion'].extend(inside.squeeze().tolist())
 
         plot = sns.stripplot(
             data=data,
-            order=self.amino_acids_sorted_,
+            order=sorted_aas,
             x="shap_value",
             y="amino_acid",
             size=2,
@@ -600,98 +652,66 @@ class ShapVisualizationIntensity:
         )
         plt.axvline(x=0, color="black", linewidth=4)
 
-        # cmap = plt.get_cmap("RdBu_r")
-        # norm = plt.Normalize(min(data["position"]), max(data["position"]))
-        # sm = matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap)
-        # sm.set_array([])
-        # cbar = fig.colorbar(sm, ax=plot, shrink=0.7)
-        # cbar.set_label("Position")
-
         if save is not False:
             plt.savefig(os.path.join(save, "swarmplot.png"))
         else:
             plt.show()
 
-    def boxplot_position(self, save="."):
+    def boxplot_position(self, exclude=['R','H','K'], save="."):
         plt.close("all")
         fig, (ax1, ax2) = plt.subplots(2, 1)
         fig.set_figwidth(15)
         fig.set_figheight(10)
+        min_occur_query = f'occurs >= {MIN_OCCUR_HEAT}'
 
-        sum_abs_sv = {}
-
-        for key in self.amino_acid_pos.keys():
-            if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
-                continue
-            sum_abs_sv[key] = mean([abs(x) for x in self.amino_acid_pos[key]])
+        # All plot
 
         data = {"SHAP values": [], "Amino acid - Position": []}
+    
+        top20 = self.tokenframe.query(min_occur_query).iloc[
+            self.tokenframe.query(min_occur_query)['sv_abs_mean'].argsort()[::-1]
+        ].iloc[:20]
+        for aaa in top20.index:
+            data["SHAP values"].extend(top20.loc[aaa]['shap_values'])
+            data["Amino acid - Position"].extend(top20.loc[aaa]['occurs'].sum()*[aaa])
+        df = pd.DataFrame(data)
+        sns.boxplot(
+            ax=ax1,
+            data=df,
+            x="Amino acid - Position",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title("Shapley values per amino acid-position for ion " + self.ion)
 
-        if sum_abs_sv:
-            for aa in list(
-                dict(
-                    sorted(sum_abs_sv.items(), key=lambda x: x[1], reverse=True)[:20]
-                ).keys()
-            ):
-                # Shorten UNIMOD modifications
-                aa_abb = re.sub('UNIMOD:', '', aa)
-                for shap in self.amino_acid_pos[aa]:
-                    data["SHAP values"].append(shap)
-                    data["Amino acid - Position"].append(aa_abb)
-
-            df = pd.DataFrame(data)
-            sns.boxplot(
-                ax=ax1,
-                data=df,
-                x="Amino acid - Position",
-                y="SHAP values",
-                color="#1f77b4",
-            ).set_title("Shapley values per amino acid-position for ion " + self.ion)
-
-        sum_abs_sv_without_rhk = {}
-
-        for key in self.amino_acid_pos.keys():
-            if key.startswith(("R", "H", "K")):
-                continue
-            if len(self.amino_acid_pos[key]) < MIN_OCCUR_HEAT:
-                continue
-            sum_abs_sv_without_rhk[key] = mean(
-                [abs(x) for x in self.amino_acid_pos[key]]
-            )
+        # Excldue plot
 
         data = {"SHAP values": [], "Amino acid - Position": []}
-
-        if sum_abs_sv_without_rhk:
-            for aa in list(
-                dict(
-                    sorted(
-                        sum_abs_sv_without_rhk.items(), key=lambda x: x[1], reverse=True
-                    )[:20]
-                ).keys()
-            ):
-                # Shorten UNIMOD modifications
-                aa_abb = re.sub('UNIMOD:', '', aa)
-                for shap in self.amino_acid_pos[aa]:
-                    data["SHAP values"].append(shap)
-                    data["Amino acid - Position"].append(aa_abb)
-
-            df = pd.DataFrame(data)
-            sns.boxplot(
-                data=df,
-                x="Amino acid - Position",
-                y="SHAP values",
-                color="#1f77b4",
-            ).set_title(
-                "Shapley values per amino acid-position for ion "
-                + self.ion
-                + " excluding R,H,K amino acids"
-            )
+        
+        wo_exclude = self.tokenframe[self.tokenframe['abbreviated'].str.startswith(tuple(exclude))==False]
+        top20 = wo_exclude.query(min_occur_query).iloc[
+            wo_exclude.query(min_occur_query)['sv_abs_mean'].argsort()[::-1]
+        ].iloc[:20]
+        for aaa in top20.index:
+            data["SHAP values"].extend(top20.loc[aaa]['shap_values'])
+            data["Amino acid - Position"].extend(top20.loc[aaa]['occurs'].sum()*[aaa])
+        df = pd.DataFrame(data)
+        sns.boxplot(
+            data=df,
+            x="Amino acid - Position",
+            y="SHAP values",
+            color="#1f77b4",
+        ).set_title(
+            "Shapley values per amino acid-position for ion "
+            + self.ion
+            + f" excluding {exclude} amino acids"
+        )
 
         if save is not False:
             plt.savefig(os.path.join(save, "boxplot_position.png"), bbox_inches="tight")
         else:
             plt.show()
-
+    
+    """
     def boxplot_token(self, save="."):
         plt.close("all")
         fig, (ax1, ax2) = plt.subplots(2, 1)
@@ -764,6 +784,7 @@ class ShapVisualizationIntensity:
             plt.savefig(os.path.join(save, "boxplot_bi_token.png"), bbox_inches="tight")
         else:
             plt.show()
+    """
 
     def full_report(self, save="."):
         if not os.path.exists(save):
@@ -771,10 +792,10 @@ class ShapVisualizationIntensity:
         self.aa_only_plot(save=save)
         self.position_only_plot(save=save)
         self.position_heatmap(save=save)
-        self.aa_heatmap(save=save)
+        #self.aa_heatmap(save=save)
         self.swarmplot(save=save)
         self.boxplot_position(save=save)
-        self.boxplot_token(save=save)
+        #self.boxplot_token(save=save)
 
 class ShapVisualizationGeneral():
     def __init__(

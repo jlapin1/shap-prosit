@@ -37,9 +37,9 @@ shap_calculator:
       yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
-  mode: y7+2
-  sv_path: "prosit_ac_99/output.parquet"
-  out_path: _y7+2
+  mode: y5+1
+  sv_path: "combined_df.parquet"
+  out_path: test
   filter_expr:
   clustering:
     run: False
