@@ -38,9 +38,14 @@ shap_calculator:
   
 shap_visualization:
   mode: y5+1
-  sv_path: "combined_df.parquet"
+  sv_path: "results/prosit_ac/output.parquet"
   out_path: test
   filter_expr:
+  bitoken: True
+  position_combos:
+    - [0,1]
+    - [-1,0]
+    - [0,4]
   clustering:
     run: False
     from_which_end: right

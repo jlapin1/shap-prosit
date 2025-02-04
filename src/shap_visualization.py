@@ -2,7 +2,7 @@ import os
 import sys
 from operator import itemgetter
 from pathlib import Path
-from typing import Union
+from typing import Union, List
 import re
 
 import matplotlib
@@ -17,6 +17,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 from sklearn.cluster import Birch, KMeans
 from sklearn.decomposition import PCA
+from tqdm import tqdm
 
 matplotlib.use("Agg")
 MIN_OCCUR_AVG = 100
@@ -38,19 +39,18 @@ class ShapVisualizationIntensity:
         self,
         sv_path: Union[str, bytes, os.PathLike],
         ion: str,
-        position_combos: list | None = None,
+        position_combos: List[list] | None = None,
         filter_expr: str = None,
+        bitoken: bool = False,
         maximum_sequence_length: int = 30,
     ) -> None:
         self.maximum_sequence_length = maximum_sequence_length
-        if position_combos is None:
-            self.position_combos = [
-                [0, -1],
-                [ion_extent(ion) - 1, 0],
-                [ion_extent(ion) - 1, -1],
-            ]
-        else:
-            self.position_combos = position_combos
+        self.default_position_combos = [
+            [0, -1],
+            [ion_extent(ion) - 1, 0],
+            [ion_extent(ion) - 1, -1],
+        ]
+        self.position_combos = position_combos
         df = pd.read_parquet(sv_path)
         df["sequence_length"] = np.vectorize(len)(df["sequence"])
 
@@ -78,25 +78,6 @@ class ShapVisualizationIntensity:
         self.seq_list = df["sequence"].tolist()
         self.shap_values_list = df["shap_values"].tolist()
         self.bgd_mean = df["bgd_mean"].tolist()[0]
-        
-        ##################
-        # OLD CODE START #
-        ##################
-        """
-        # Initialize data structures
-        self.count_positions = np.zeros((maximum_sequence_length))
-        self.sv_sum = np.zeros((maximum_sequence_length))
-        self.sv_abs_sum = np.zeros((maximum_sequence_length))
-        self.combo_pos_sv_sum = []
-        self.combo_pos_sv_abs_sum = []
-        self.combo_inten = []
-        self.amino_acids_sv = {}
-        self.amino_acid_pos = {}
-        self.amino_acid_pos_inten = {}
-        """
-        ################
-        # OLD CODE END #
-        ################
 
         dataframe = {
             'original': [], 
@@ -110,9 +91,28 @@ class ShapVisualizationIntensity:
         }
         list_index = {}
 
-        for sequence, shap_values, intensity in zip(
-            self.seq_list, self.shap_values_list, self.pred_intensities
-        ):
+        dataframe2 = {
+            'token1': [],
+            'token2': [],
+            'amino_acid1': [],
+            'amino_acid2': [],
+            'abbreviated1': [],
+            'abbreviated2': [],
+            'position1': [],
+            'position2': [],
+            'bitoken': [],
+            #'shap_values1': [],
+            #'shap_values2': [],
+            'mean_shap_values': [],
+            'abs_shap_values': [],
+            'intensities': [],
+        }
+        list_index2 = {}
+        
+        total = len(self.seq_list)
+        pbar = tqdm(zip(self.seq_list, self.shap_values_list, self.pred_intensities), total=total)
+        for sequence, shap_values, intensity in pbar:
+            
             seq = np.array(sequence)
             sv = np.array(shap_values)
             inten = intensity
@@ -126,27 +126,8 @@ class ShapVisualizationIntensity:
             #le = len(seq)
             #self.count_positions += np.append(np.ones((le)), np.zeros((maximum_sequence_length - le)))
             
-            ##################
-            # OLD CODE START #
-            ##################
-            """
-            # Gather sum and abs sum of SV in each position
-            # FIXME Position plot no longer works with tokens that lack amino acids
-            if self.ion[0] in reverse_ion_list:  # Reverse string for y-ion
-                self.sv_sum[:le] += sv[::-1]
-                self.sv_abs_sum[:le] += abs(sv[::-1])
-            else:
-                self.sv_sum[:le] += sv
-                self.sv_abs_sum[:le] += abs(sv)
-
-            self.__bi_token_combo(seq, sv, inten)
-            """
-            ################
-            # OLD CODE END #
-            ################
-
             for i, (am_ac, aa_pos, sh_value) in enumerate(zip(seq, aa_position, sv)):
-                
+
                 relative_position = (
                     aa_pos + ion_extent(self.ion) - aa_max_pos
                     if self.ion[0] in reverse_ion_list else
@@ -173,40 +154,54 @@ class ShapVisualizationIntensity:
                 dataframe['shap_values'][list_index[token]].append(sh_value)
                 dataframe['intensities'][list_index[token]].append(inten)
                 
-                ##################
-                # OLD CODE START #
-                ##################
-                """
-                # Replace {A}[UNIMOD:{#}] with {A}{#}
-                am_ac_ = re.sub("\[UNIMOD:|\]", "", am_ac)
-                
-                # Store SV for each AA
-                if am_ac_ not in self.amino_acids_sv:
-                    self.amino_acids_sv[am_ac_] = []
-                self.amino_acids_sv[am_ac_].append(sh_value)
-
-                # Create token for AA and position
-                # 0 is the first index in ion, positives are inside ion
-                # negatives are outside of ion
-                tok_c = (
-                    f"{am_ac_}_{aa_pos + ion_extent(self.ion) - aa_max_pos}"
-                    if self.ion[0] in reverse_ion_list
-                    else f"{am_ac_}_{ion_extent(self.ion) - aa_pos - 1}"
-                )
-
-                # Check if token already in dictionary
-                if tok_c not in self.amino_acid_pos:
-                    self.amino_acid_pos[tok_c] = []
-                if tok_c not in self.amino_acid_pos_inten:
-                    self.amino_acid_pos_inten[tok_c] = []
-
-                # Store values for token in list
-                self.amino_acid_pos[tok_c].append(sh_value)
-                self.amino_acid_pos_inten[tok_c].append(inten)
-                """
-                ################
-                # OLD CODE END #
-                ################
+                if bitoken:
+                    for j, (am_ac2, aa_pos2, sh_value2) in enumerate(zip(seq, aa_position, sv)):
+                        if i != j:
+                            relative_position2 = (
+                                aa_pos2 + ion_extent(self.ion) - aa_max_pos
+                                if self.ion[0] in reverse_ion_list else
+                                ion_extent(self.ion) - aa_pos2 - 1
+                            )
+                            
+                            abbr2 = re.sub("\[UNIMOD:|\]", "", am_ac2)
+                            pos = np.array([relative_position, relative_position2])
+                            amac = np.array([am_ac, am_ac2])
+                            abbrs = np.array([abbr, abbr2])
+                            sort = np.argsort([relative_position, relative_position2])
+                            pos = pos[sort]
+                            # Check to see if any combos are fulfilled
+                            proceed = any([
+                                relative_position==combo[0] and relative_position2==combo[1] 
+                                for combo in position_combos
+                            ]) if position_combos is not None else True
+                            if proceed:
+                                amac = amac[sort]
+                                abbrs = abbrs[sort]
+                                token1 = f"{abbrs[0]}_{pos[0]}"
+                                token2 = f"{abbrs[1]}_{pos[1]}"
+                                Bitoken = f"{token1}|{token2}"
+                                if Bitoken not in dataframe2['bitoken']:
+                                    dataframe2['bitoken'].append(Bitoken)
+                                    dataframe2['token1'].append(token1)
+                                    dataframe2['token2'].append(token2)
+                                    dataframe2['abbreviated1'].append(abbrs[0])
+                                    dataframe2['abbreviated2'].append(abbrs[1])
+                                    dataframe2['amino_acid1'].append(amac[0])
+                                    dataframe2['amino_acid2'].append(amac[1])
+                                    dataframe2['position1'].append(pos[0])
+                                    dataframe2['position2'].append(pos[1])
+                                    lind = len(dataframe2['mean_shap_values'])
+                                    list_index2[bitoken] = lind
+                                    #dataframe2['shap_values1'].append([])
+                                    #dataframe2['shap_values2'].append([])
+                                    dataframe2['mean_shap_values'].append([])
+                                    dataframe2['abs_shap_values'].append([])
+                                    dataframe2['intensities'].append([])
+                                #dataframe2['shap_values1'][list_index2[bitoken]].append(sh_value)
+                                #dataframe2['shap_values2'][list_index2[bitoken]].append(sh_value2)
+                                dataframe2['mean_shap_values'][list_index2[bitoken]].append((sh_value+sh_value2)/2)
+                                dataframe2['abs_shap_values'][list_index2[bitoken]].append(abs(sh_value)+abs(sh_value2))
+                                dataframe2['intensities'][list_index2[bitoken]].append(inten)
         
         hold = pd.DataFrame(dataframe).set_index('token')
         hold['occurs'] = hold.apply(lambda x: len(x['shap_values']), axis=1)
@@ -216,95 +211,16 @@ class ShapVisualizationIntensity:
         hold['int_mean'] = hold.apply(lambda x: np.mean(x['intensities']), axis=1)
         self.tokenframe = hold
         
-        ##################
-        # OLD CODE START #
-        ##################
-        """
-        # This includes all tokens
-        self.amino_acids_sorted = np.sort(list(self.amino_acids_sv.keys()))
-        # This excludes modification-only tokens (N-term)
-        self.amino_acids_sorted_ = np.array([
-            m for m in self.amino_acids_sorted 
-            if (m[0]!='[' or m[-1]!=']')
-        ])
-
-        self.sv_avg = self.sv_sum / (self.count_positions + 1e-9)
-        self.sv_avg *= self.count_positions > MIN_OCCUR_AVG
-        self.sv_abs_avg = self.sv_abs_sum / (self.count_positions + 1e-9)
-        self.sv_abs_avg *= self.count_positions > MIN_OCCUR_AVG
-
-        self.amino_acids_abs_avg_sv = {
-            a: np.mean(np.abs(self.amino_acids_sv[a])) for a in self.amino_acids_sorted
-        }
-        self.amino_acids_avg_sv = {
-            a: np.mean(self.amino_acids_sv[a]) for a in self.amino_acids_sorted
-        }
-        self.amino_acids_std_sv = {
-            a: np.std(self.amino_acids_sv[a]) for a in self.amino_acids_sorted
-        }
-
-        # AA-position heatmaps
-        # Consolidate lists of values into single values for each token
-        self.amino_acid_pos_mean_inten = {
-            tok: np.mean(self.amino_acid_pos_inten[tok])
-            for tok in self.amino_acid_pos_inten.keys()
-            if len(self.amino_acid_pos_inten[tok]) > MIN_OCCUR_HEAT
-        }
-        self.amino_acid_pos_avg = {
-            tok: np.mean(self.amino_acid_pos[tok])
-            for tok in self.amino_acid_pos.keys()
-            if len(self.amino_acid_pos[tok]) > MIN_OCCUR_HEAT
-        }
-        self.amino_acid_pos_abs_avg = {
-            tok: np.mean(np.abs(self.amino_acid_pos[tok]))
-            for tok in self.amino_acid_pos.keys()
-            if len(self.amino_acid_pos[tok]) > MIN_OCCUR_HEAT
-        }
-        """
-        ################
-        # OLD CODE END #
-        ################
-    
-    """
-    def __bi_token_combo(self, sequence, shap_values, intensity):
-        for i, combo in enumerate(self.position_combos):
-            # Append new dictionary
-            if i >= len(self.combo_pos_sv_sum):
-                self.combo_pos_sv_sum.append({})
-                self.combo_pos_sv_abs_sum.append({})
-                self.combo_inten.append({})
-
-            if self.ion[0] in ["y", "z", "Z"]:
-                seq = sequence[::-1]
-                sv = shap_values[::-1]
-            else:
-                seq = sequence
-                sv = shap_values
-
-            ion_size = ion_extent(self.ion)
-            combo_pos = [-1 * combo[0] + ion_size - 1, -1 * combo[1] + ion_size - 1]
-
-            if combo_pos[0] >= len(sequence) or combo_pos[1] >= len(sequence):
-                continue
-
-            # AA-AA token
-            tok = f"{seq[combo_pos[0]]}-{seq[combo_pos[1]]}"
-
-            # Initialize lists for new tokens
-            if tok not in self.combo_pos_sv_sum[i]:
-                self.combo_pos_sv_sum[i][tok] = []
-            if tok not in self.combo_pos_sv_abs_sum[i]:
-                self.combo_pos_sv_abs_sum[i][tok] = []
-            if tok not in self.combo_inten[i]:
-                self.combo_inten[i][tok] = []
-
-            self.combo_pos_sv_sum[i][tok].append(sv[combo_pos[0]] + sv[combo_pos[1]])
-            self.combo_pos_sv_abs_sum[i][tok].append(
-                abs(sv[combo_pos[0]]) + abs(sv[combo_pos[1]])
-            )
-            self.combo_inten[i][tok].append(intensity)
-    """
-    
+        if bitoken:
+            hold2 = pd.DataFrame(dataframe2).set_index('bitoken')
+            hold2['occurs'] = hold2.apply(lambda x: len(x['mean_shap_values']), axis=1)
+            hold2['sv_mean_mean'] = hold2.apply(lambda x: np.mean(x['mean_shap_values']), axis=1)
+            hold2['sv_abs_mean'] = hold2.apply(lambda x: np.mean(x['abs_shap_values']), axis=1)
+            hold2['sv_mean_std'] = hold2.apply(lambda x: np.std(x['mean_shap_values']), axis=1)
+            hold2['sv_abs_std'] = hold2.apply(lambda x: np.std(x['abs_shap_values']), axis=1)
+            hold2['int_mean'] = hold2.apply(lambda x: np.mean(x['intensities']), axis=1)
+            self.bitokenframe = hold2
+        
     """
     def clustering(self, config: dict):
         number_of_aas = config["clustering"]["number_of_aa"]
@@ -448,7 +364,7 @@ class ShapVisualizationIntensity:
         axes[3].set_xlim([-0.5, 19.5])
         for ax in axes:
             ax.set_xticks(np.arange(len(sorted_aas)))
-            ax.set_xticklabels(sorted_aas, size=8)
+            ax.set_xticklabels(sorted_aas, size=8, rotation=270)
         for ax in axes[[1, 3]]:
             ax.set_yticks([])
             ax.set_yticklabels([])
@@ -550,14 +466,21 @@ class ShapVisualizationIntensity:
         else:
             plt.show()
     
-    """
     def aa_heatmap(self, all_tokens=False, save=False):
         plt.close("all")
         
-        amino_acids = (
-            self.amino_acids_sorted if all_tokens else self.amino_acids_sorted_
+        position_combos = (
+            self.default_position_combos if 
+            self.position_combos == None
+            else self.position_combos
         )
-
+        
+        if all_tokens:
+            amino_acids = sorted(np.unique(self.bitokenframe['abbreviated1'].to_list() + self.bitokenframe['abbreviated2'].to_list()))
+        else:
+            all_aa = self.bitokenframe[(self.bitokenframe['abbreviated1']!='') | (self.bitokenframe['abbreviated2']!='')]
+            amino_acids = sorted(np.unique(all_aa['abbreviated1'].to_list() + all_aa['abbreviated2'].to_list()))
+        
         fig, axes = plt.subplots(3, len(self.position_combos))
         fig.set_figheight(15)
         fig.set_figwidth(17)
@@ -567,7 +490,7 @@ class ShapVisualizationIntensity:
             ax.set_yticklabels(amino_acids, size=6)
             ax.set_ylabel("AA(L)")
             ax.set_xticks(np.arange(len(amino_acids)))
-            ax.set_xticklabels(amino_acids, size=6)
+            ax.set_xticklabels(amino_acids, size=6, rotation=270)
             ax.set_xlabel("AA(R)")
 
         for i, combo in enumerate(self.position_combos):
@@ -580,16 +503,18 @@ class ShapVisualizationIntensity:
             heatmap_int = np.zeros(
                 (len(amino_acids), len(amino_acids))
             )
+
+            subset = self.bitokenframe.query(f"position1 == {combo[0]} and position2 == {combo[1]}")
             for l, aa1 in enumerate(amino_acids):
                 for m, aa2 in enumerate(amino_acids):
-                    tok = "%s-%s" % (aa1, aa2)
-                    if tok in self.combo_pos_sv_sum[i]:
-                        if len(self.combo_pos_sv_sum[i][tok]) > MIN_OCCUR_HEAT:
-                            heatmap[l, m] = np.mean(self.combo_pos_sv_sum[i][tok])
-                            heatmap_abs[l, m] = np.mean(
-                                self.combo_pos_sv_abs_sum[i][tok]
-                            )
-                            heatmap_int[l, m] = np.mean(self.combo_inten[i][tok])
+                    subset_ = subset.query(f"abbreviated1 == '{aa1}' and abbreviated2 == '{aa2}'")
+                    assert (len(subset_) > 1) == False
+                    if len(subset_) == 1:
+                        entry = subset_.iloc[0]
+                        if entry['occurs'] > MIN_OCCUR_HEAT:
+                            heatmap[l, m] = entry['sv_mean_mean']
+                            heatmap_abs[l, m] = entry['sv_abs_mean']
+                            heatmap_int[l, m] = entry['int_mean']
 
             axes[0, i].set_title("%d_%d: mean(intensity)" % tuple(combo))
             im = axes[0, i].imshow(heatmap_int, cmap="RdBu_r", norm=TwoSlopeNorm(0))
@@ -606,13 +531,12 @@ class ShapVisualizationIntensity:
             plt.savefig(os.path.join(save, "aa_heatmap.png"), bbox_inches="tight")
         else:
             plt.show()
-    """
 
     def swarmplot(self, save=False):
         plt.close("all")
         fig, ax = plt.subplots()
         fig.set_figwidth(15)
-        fig.set_figheight(8)
+        fig.set_figheight(13)
         
         data = {"shap_value": [], "amino_acid": [], "inside_ion": []}
         sorted_aas = sorted(self.tokenframe.query("amino_acid != ''")['abbreviated'].unique())
@@ -635,9 +559,16 @@ class ShapVisualizationIntensity:
             perm = np.random.permutation(np.array([shap_values, amino_acids, inside]).T)
             [shap_values, amino_acids, inside] = np.split(perm, 3, 1)
             
-            data['shap_value'].extend(shap_values.astype(np.float32).squeeze().tolist())
-            data['amino_acid'].extend(amino_acids.squeeze().tolist())
-            data['inside_ion'].extend(inside.squeeze().tolist())
+            SV = shap_values.astype(np.float32).squeeze()
+            AA = amino_acids.squeeze()
+            INSIDE = inside.squeeze()
+            if len(SV.shape)<1:
+               SV = SV[None]
+               AA = AA[None]
+               INSIDE = INSIDE[None]
+            data['shap_value'].extend(SV.tolist())
+            data['amino_acid'].extend(AA.tolist())
+            data['inside_ion'].extend(INSIDE.tolist())
 
         plot = sns.stripplot(
             data=data,
@@ -792,7 +723,7 @@ class ShapVisualizationIntensity:
         self.aa_only_plot(save=save)
         self.position_only_plot(save=save)
         self.position_heatmap(save=save)
-        #self.aa_heatmap(save=save)
+        self.aa_heatmap(save=save)
         self.swarmplot(save=save)
         self.boxplot_position(save=save)
         #self.boxplot_token(save=save)
@@ -1135,6 +1066,8 @@ if __name__ == "__main__":
             config["shap_visualization"]["sv_path"], 
             ion=mode,
             filter_expr=config["shap_visualization"]["filter_expr"],
+            bitoken=config['shap_visualization']['bitoken'],
+            position_combos=config['shap_visualization']['position_combos'],
         )
     
     """Full report"""
