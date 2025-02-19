@@ -460,9 +460,10 @@ class ShapVisualizationIntensity:
             ax.set_yticklabels(amino_acids, size=8)
             ax.set_xticks(np.arange(self.maximum_sequence_length))
             ax.set_xticklabels(tick_range, size=7)
-        fig.colorbar(im, pad=0.01).ax.set_yscale("linear")
-        fig.colorbar(im2, pad=0.01).ax.set_yscale("linear")
-        fig.colorbar(im3, pad=0.01).ax.set_yscale("linear")
+        kwargs = {'format': '%.2f'}
+        fig.colorbar(im, pad=0.01, **kwargs).ax.set_yscale("linear")
+        fig.colorbar(im2, pad=0.01, **kwargs).ax.set_yscale("linear")
+        fig.colorbar(im3, pad=0.01, **kwargs).ax.set_yscale("linear")
         if save is not False:
             plt.savefig(os.path.join(save, "position_heatmap.png"), bbox_inches="tight")
         else:
