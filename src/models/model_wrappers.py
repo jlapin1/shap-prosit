@@ -271,109 +271,67 @@ class KoinaWrapper(ModelWrapper):
         self.inputs_ignored = inputs_ignored
 
     def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
-        # set mode = "rt" to enter retention time mode
-        # inputs["sequences"] = [["W", "E"],[],[]]
-        if self.mode == ["rt"]:
+        sequences = []
+        for i in inputs[:, :-self.inputs_ignored]:
+            try:
+                sequence = "".join(i)
+            except:
+                sequence = b"".join(i).decode("utf-8")
+            # FIXME If sequence contains mods that prosit can't handle, remove the input
+            # instance
+            sequence = re.sub('\[UNIMOD:4]', '', sequence)
+            sequence = re.sub('\[UNIMOD:1]', '', sequence)
+            sequences.append(sequence)
+        # FIXME This always assumes charge is third to last and collision energy second
+        # to last (method is last). Need a dynamic way of finding these two features'
+        # positions.
+        input_dict = {
+            "peptide_sequences": np.array(sequences),
+            "precursor_charges": inputs[:, -3].astype("int"),
+            "collision_energies": (inputs[:, -2].astype("float")).astype(
+                "int"
+            ),
+        }
+        counter = 0
+        success = False
+        while counter < 5 and not success:
+            try:
+                preds = self.model.predict(
+                    pd.DataFrame(input_dict), min_intensity=-0.00001
+                )
+            except:
+                print(input_dict)
+                counter += 1
+                sleep(1)
+            else:
+                success = True
+        if counter >= 5:
+            return np.zeros(len(inputs))
 
-            print(type(hx(inputs)["sequence"][0]))
+        # Find the annotation/mode in the koina output
+        results = {}
+        missing_values = {}
+        for mode in self.mode:
+            results[mode] = []
+            missing_values[mode] = 0
 
-            sequences = []
-            for seq in hx(inputs)["sequence"]:
-                try:
-                    sequence = "".join(seq)
-                except:
-                    sequence = b"".join(seq).decode("utf-8")
-                sequences.append(sequence)
+            ann_bool = preds["annotation"] == bytes(mode, "utf-8")
 
-            input_df = pd.DataFrame()
-            input_df["peptide_sequences"] = np.array(sequences)
+            # If you don't find it, return 0 prediction
+            if len(preds[ann_bool]["intensities"]) < len(sequences):
+                if silent == False: print(preds)
+                for i in range(len(sequences)):
+                    if i not in preds[ann_bool]["intensities"].index:
+                        results[mode].append(0.0)
+                        missing_values[mode] += 1
+                    else:
+                        results[mode].append(preds[ann_bool]["intensities"][i])
+            else:
+                results[mode] = preds[ann_bool]["intensities"].to_list()
 
-            pred = (self.model.predict(input_df)["irt"]).to_numpy()
-            pred = np.expand_dims(pred, axis=1)
-            print(pred.shape)
-            return pred
+            assert len(results[mode]) == len(sequences)
 
-        elif self.mode == ["cc"]:
-            # set mode = "cc" to enter retention time mode
-            sequences = []
-            for seq in hx(inputs)["sequence"]:
-                try:
-                    sequence = "".join(seq)
-                except:
-                    sequence = b"".join(seq).decode("utf-8")
-                sequences.append(sequence)
-
-            input_df = pd.DataFrame()
-            input_df["peptide_sequences"] = np.array(sequences)
-            input_df["precursor_charges"] = inputs[:, -1].astype("int")
-
-            pred = (self.model.predict(input_df)["ccs"]).to_numpy()
-            pred = np.expand_dims(pred, axis=1)
-            return pred
-
-
-        else:
-            sequences = []
-            for i in inputs[:, :-self.inputs_ignored]:
-                try:
-                    sequence = "".join(i)
-                except:
-                    sequence = b"".join(i).decode("utf-8")
-                # FIXME If sequence contains mods that prosit can't handle, remove the input
-                # instance
-                sequence = re.sub('\[UNIMOD:4]', '', sequence)
-                sequence = re.sub('\[UNIMOD:1]', '', sequence)
-                sequences.append(sequence)
-            # FIXME This always assumes charge is third to last and collision energy second
-            # to last (method is last). Need a dynamic way of finding these two features'
-            # positions.
-            input_dict = {
-                "peptide_sequences": np.array(sequences),
-                "precursor_charges": inputs[:, -3].astype("int"),
-                "collision_energies": (inputs[:, -2].astype("float")).astype(
-                    "int"
-                ),
-            }
-            counter = 0
-            success = False
-            while counter < 5 and not success:
-                try:
-                    preds = self.model.predict(
-                        pd.DataFrame(input_dict), min_intensity=-0.00001
-                    )
-                except:
-                    print(input_dict)
-                    counter += 1
-                    sleep(1)
-                else:
-                    success = True
-            if counter >= 5:
-                return np.zeros(len(inputs))
-
-            # Find the annotation/mode in the koina output
-            results = {}
-            missing_values = {}
-            for mode in self.mode:
-                results[mode] = []
-                missing_values[mode] = 0
-
-                ann_bool = preds["annotation"] == bytes(mode, "utf-8")
-
-                # If you don't find it, return 0 prediction
-                if len(preds[ann_bool]["intensities"]) < len(sequences):
-                    if silent == False: print(preds)
-                    for i in range(len(sequences)):
-                        if i not in preds[ann_bool]["intensities"].index:
-                            results[mode].append(0.0)
-                            missing_values[mode] += 1
-                        else:
-                            results[mode].append(preds[ann_bool]["intensities"][i])
-                else:
-                    results[mode] = preds[ann_bool]["intensities"].to_list()
-
-                assert len(results[mode]) == len(sequences)
-
-            return pd.DataFrame(results).to_numpy()
+        return pd.DataFrame(results).to_numpy()
 
 class KoinaAC(KoinaWrapper):
     def __init__(
@@ -585,11 +543,54 @@ class FlyabilityWrapper(ModelWrapper):
         return pred[:, self.mode]
 
 
+class KoinaCCS(KoinaWrapper):
+    def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
+        sequences = []
+        for seq in hx(inputs)["sequence"]:
+            try:
+                sequence = "".join(seq)
+            except:
+                sequence = b"".join(seq).decode("utf-8")
+            sequences.append(sequence)
+
+        input_df = pd.DataFrame()
+        input_df["peptide_sequences"] = np.array(sequences)
+
+        precursor_charges = []
+        charge_helper = np.array([1, 2, 3, 4, 5, 6])
+        for arr in hx(inputs)["precursor_charge"]:
+            precursor_charges.append(np.sum(arr * charge_helper))
+        input_df["precursor_charges"] = precursor_charges
+
+        pred = (self.model.predict(input_df)["ccs"]).to_numpy()
+        pred = np.expand_dims(pred, axis=1)
+        return pred
+
+
+class KoinaIRT(KoinaWrapper):
+    def make_prediction(self, inputs: ndarray, silent: bool = True) -> ndarray:
+        sequences = []
+        for seq in hx(inputs)["sequence"]:
+            try:
+                sequence = "".join(seq)
+            except:
+                sequence = b"".join(seq).decode("utf-8")
+            sequences.append(sequence)
+
+        input_df = pd.DataFrame()
+        input_df["peptide_sequences"] = np.array(sequences)
+
+        pred = (self.model.predict(input_df)["irt"]).to_numpy()
+        pred = np.expand_dims(pred, axis=1)
+        return pred
+
 
 model_wrappers = {
     "torch_pe": TorchPE,
     "torch_prosit": TorchProsit,
     "koina": KoinaWrapper,
+    "koina_irt": KoinaIRT,
+    "koina_ccs": KoinaCCS,
     "koina_ac": KoinaAC,
     "charge": ChargeStateWrapper,
     "flyability": FlyabilityWrapper,
