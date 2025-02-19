@@ -38,8 +38,8 @@ shap_calculator:
   
 shap_visualization:
   mode: y5+1
-  sv_path: "results/prosit_ac/output.parquet"
-  out_path: test
+  sv_path: results/hcd/koina/multi_koina_output/output.parquet
+  out_path: results/hcd/koina/multi_koina_output/y5+1
   filter_expr:
   bitoken: True
   position_combos:

@@ -180,6 +180,8 @@ class ShapVisualizationIntensity:
                                 token1 = f"{abbrs[0]}_{pos[0]}"
                                 token2 = f"{abbrs[1]}_{pos[1]}"
                                 Bitoken = f"{token1}|{token2}"
+                                #if token2 == 'P_0':
+                                #    print()
                                 if Bitoken not in dataframe2['bitoken']:
                                     dataframe2['bitoken'].append(Bitoken)
                                     dataframe2['token1'].append(token1)
@@ -191,17 +193,17 @@ class ShapVisualizationIntensity:
                                     dataframe2['position1'].append(pos[0])
                                     dataframe2['position2'].append(pos[1])
                                     lind = len(dataframe2['mean_shap_values'])
-                                    list_index2[bitoken] = lind
+                                    list_index2[Bitoken] = lind
                                     #dataframe2['shap_values1'].append([])
                                     #dataframe2['shap_values2'].append([])
                                     dataframe2['mean_shap_values'].append([])
                                     dataframe2['abs_shap_values'].append([])
                                     dataframe2['intensities'].append([])
-                                #dataframe2['shap_values1'][list_index2[bitoken]].append(sh_value)
-                                #dataframe2['shap_values2'][list_index2[bitoken]].append(sh_value2)
-                                dataframe2['mean_shap_values'][list_index2[bitoken]].append((sh_value+sh_value2)/2)
-                                dataframe2['abs_shap_values'][list_index2[bitoken]].append(abs(sh_value)+abs(sh_value2))
-                                dataframe2['intensities'][list_index2[bitoken]].append(inten)
+                                #dataframe2['shap_values1'][list_index2[Bitoken]].append(sh_value)
+                                #dataframe2['shap_values2'][list_index2[Bitoken]].append(sh_value2)
+                                dataframe2['mean_shap_values'][list_index2[Bitoken]].append((sh_value+sh_value2)/2)
+                                dataframe2['abs_shap_values'][list_index2[Bitoken]].append(abs(sh_value)+abs(sh_value2))
+                                dataframe2['intensities'][list_index2[Bitoken]].append(inten)
         
         hold = pd.DataFrame(dataframe).set_index('token')
         hold['occurs'] = hold.apply(lambda x: len(x['shap_values']), axis=1)
@@ -455,12 +457,12 @@ class ShapVisualizationIntensity:
                 x=ion_extent(self.ion) - 0.5, color="black", linewidth=3
             )
             ax.set_yticks(np.arange(len(amino_acids)))
-            ax.set_yticklabels(amino_acids, size=6)
+            ax.set_yticklabels(amino_acids, size=8)
             ax.set_xticks(np.arange(self.maximum_sequence_length))
-            ax.set_xticklabels(tick_range, size=6)
-        fig.colorbar(im).ax.set_yscale("linear")
-        fig.colorbar(im2).ax.set_yscale("linear")
-        fig.colorbar(im3).ax.set_yscale("linear")
+            ax.set_xticklabels(tick_range, size=7)
+        fig.colorbar(im, pad=0.01).ax.set_yscale("linear")
+        fig.colorbar(im2, pad=0.01).ax.set_yscale("linear")
+        fig.colorbar(im3, pad=0.01).ax.set_yscale("linear")
         if save is not False:
             plt.savefig(os.path.join(save, "position_heatmap.png"), bbox_inches="tight")
         else:
