@@ -10,17 +10,17 @@ This will create folder with the same name as ion in config, generate there "out
 
 To run only SHAP values extraction:
 ```shell
-python src/shap_prosit/shap_calculator.py <config_path>
+python src/shap_calculator.py <config_path>
 ```
 This will create folder with the same name as ion in config and generate there "output.txt" file with SHAP values.
 
 To run only SHAP values visualization:
 ```shell
-python src/shap_prosit/shap_visualization.py <config_path>
+python src/shap_visualization.py <config_path>
 ```
 This will generate plots of SHAP values in the same folder, where given "output.txt" is located.
 
-### Config structure
+### Config structure [OUTDATED]
 
 | Variables      | Functionality                                                              | Needed to run  \_\_main\_\_ pipeline | Needed to run  shap_calculator.py | Needed to run  shap_visualization.py |
 |----------------|----------------------------------------------------------------------------|:------------------------------------:|:---------------------------------:|:------------------------------------:|
