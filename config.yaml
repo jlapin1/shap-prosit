@@ -37,15 +37,15 @@ shap_calculator:
       yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
   
 shap_visualization:
-  mode: b9+1
+  mode: b5+1
   sv_path: results/hcd/koina/multi_koina_output/output.parquet
-  out_path: results/hcd/koina/multi_koina_output/b9+1
+  out_path: results/hcd/koina/multi_koina_output/b5+1
   filter_expr:
   bitoken: True
   position_combos:
     - [0,1]
     - [-1,0]
-    - [0,8]
+    - [0,4]
   clustering:
     run: False
     from_which_end: right
