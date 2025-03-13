@@ -461,7 +461,7 @@ class ShapVisualizationIntensity:
             ax.set_yticks(np.arange(len(amino_acids)))
             ax.set_yticklabels(amino_acids, size=8)
             ax.set_xticks(np.arange(self.maximum_sequence_length))
-            ax.set_xticklabels(tick_range, size=7)
+            ax.set_xticklabels(tick_range, size=7, rotation=270)
         kwargs = {'format': '%.2f'}
         fig.colorbar(im, pad=0.01, **kwargs).ax.set_yscale("linear")
         fig.colorbar(im2, pad=0.01, **kwargs).ax.set_yscale("linear")
@@ -685,7 +685,7 @@ class ShapVisualizationIntensity:
         else:
             plt.show()
 
-    def full_report(self, save="."):
+    def full_report(self, save_tokenframe=False, save="."):
         if not os.path.exists(save):
             os.makedirs(save)
         self.aa_only_plot(save=save)
@@ -695,6 +695,8 @@ class ShapVisualizationIntensity:
         self.swarmplot(save=save)
         self.boxplot_position(save=save)
         self.boxplot_bitoken(save=save)
+        if save_tokenframe:
+            self.tokenframe.to_parquet(os.path.join(save, "tokenframe.parquet"))
 
 class ShapVisualizationGeneral():
     def __init__(
@@ -1052,7 +1054,7 @@ if __name__ == "__main__":
                 user = input("Would you like to change the directory path to save? (y/n) ")
                 if user.lower() == 'y':
                     save_path = input("Type the new directory path starting from shap-prosit directory\n>>> ")
-    visualization.full_report(save=save_path)
+    visualization.full_report(save_tokenframe=config['shap_visualization']['save_tokenframe'], save=save_path)
     
     if config['shap_visualization']['clustering']['run']:
         visualization.clustering(config["shap_visualization"])

@@ -1,45 +1,77 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/home/j.lapin/projects/shap-prosit/data/prosit_ac_inputs.parquet"
-    output_dir: prosit_ac_99
+    val_data_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
+    output_dir: ETciD
     mode:
-      - b5+1
-      - y5+1
-      - b7+1
-      - y7+1
-      - b5+2
-      - y5+2
-      - b7+2
-      - y7+2
-    bgd_loc_path: prosit_ac_100/bgd_loc_indices.txt # Path or leave empty to generate and save new permutation
+      - a5
+      - a9
+      - a5^2
+      - a9^2
+      - A5
+      - A9
+      - A5^2
+      - A9^2
+      - b5
+      - b9
+      - b5^2
+      - b9^2
+      - c5
+      - c9
+      - c5^2
+      - c9^2
+      - C5
+      - C9
+      - C5^2
+      - C9^2
+      - y5
+      - y9
+      - y5^2
+      - y9^2
+      - x5
+      - x9
+      - x5^2
+      - x9^2
+      - X5
+      - X9
+      - X5^2
+      - X9^2
+      - z5
+      - z9
+      - z5^2
+      - z9^2
+      - Z5
+      - Z9
+      - Z5^2
+      - Z9^2
+    bgd_loc_path: # Path or leave empty to generate and save new permutation
     base_samp: 200
     extra_samp: [20, 500]
     bgd_sz: 100
-    inputs_ignored: 3 # Trailing attributes to ignore in input vector
+    inputs_ignored: 3 # Trailing attributes to ignore for explanations in input vector
     dataset_queries:
-      - 'index % 99 == 0'
-      - "modified_sequence.str.contains('UNIMOD')"
+      - "method == 'ETciD'"
     bgd_queries:
-      - "peptide_length > 7"
+      - "peptide_length > 9"
   
   # Reconstituting a saved torch model
   model_settings:
-    model_type: koina_ac
+    model_type: torch_prosit
     koina:
       model_path: Prosit_2024_intensity_PTMs_ac
       server_url: '10.162.163.66:9500'
       ssl: False
     local:
-      model_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/weights/model_epoch29_0.2945" # "Prosit_2019_intensity"
-      ion_dict_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/filtered_ion_dict.csv"
+      model_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/weights/model_epoch29_0.3015"
+      ion_dict_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/filtered_ion_dict.csv"
       token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
-      yaml_dir_path: "/cmnfs/home/j.lapin/projects/shabaz/torch/save/2024-12-24_07-06-13/yaml"
+      yaml_dir_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/yaml"
   
 shap_visualization:
   mode: b5+1
-  sv_path: results/hcd/koina/multi_koina_output/output.parquet
-  out_path: results/hcd/koina/multi_koina_output/b5+1
+  sv_path: results/PrositAc/prosit_ac_realnfake/combined.parquet
+  out_path: results/PrositAc/prosit_ac_realnfake/b5+1
+  save_tokenframe: True
   filter_expr:
   bitoken: True
   position_combos:
