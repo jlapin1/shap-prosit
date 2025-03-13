@@ -2,7 +2,7 @@ shap_calculator:
   # SHAP calculation settings
   shap_settings:
     val_data_path: "/cmnfs/home/j.lapin/projects/shabaz/data/shap_input.parquet"
-    output_dir: ETciD
+    output_dir: test
     mode:
       - a5
       - a9
@@ -50,22 +50,22 @@ shap_calculator:
     bgd_sz: 100
     inputs_ignored: 3 # Trailing attributes to ignore for explanations in input vector
     dataset_queries:
-      - "method == 'ETciD'"
+      - "method == 'HCD'"
     bgd_queries:
       - "peptide_length > 9"
   
   # Reconstituting a saved torch model
   model_settings:
-    model_type: torch_prosit
+    model_type: torch_pe
     koina:
       model_path: Prosit_2024_intensity_PTMs_ac
       server_url: '10.162.163.66:9500'
       ssl: False
     local:
-      model_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/weights/model_epoch29_0.3015"
-      ion_dict_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/filtered_ion_dict.csv"
-      token_dict_path: "/cmnfs/data/proteomics/shabaz_exotic/processed/merged_search/allinone/token_dictionary.txt"
-      yaml_dir_path: "/cmnfs/proj/shabaz/model/2025-02-06_12-16-20/yaml"
+      model_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/weights/model_epoch27_0.2910"
+      ion_dict_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/filtered_ion_dict.csv"
+      token_dict_path: "/cmnfs/proj/xai/token_dictionary.txt"
+      yaml_dir_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/yaml"
   
 shap_visualization:
   mode: b5+1
