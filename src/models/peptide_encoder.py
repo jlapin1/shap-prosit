@@ -1,6 +1,6 @@
 import torch as th
 from torch import nn
-import models.model_parts as mp
+import src.models.model_parts as mp
 
 def model_init(module):
     if isinstance(module, mp.SelfAttention):
