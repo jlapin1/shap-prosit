@@ -300,7 +300,7 @@ class KoinaWrapper(ModelWrapper):
                     pd.DataFrame(input_dict), min_intensity=-0.00001
                 )
             except:
-                print(input_dict)
+                if silent == False: print(input_dict)
                 counter += 1
                 sleep(1)
             else:
