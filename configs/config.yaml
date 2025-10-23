@@ -1,7 +1,7 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/proj/xai/shap_input.parquet" # read
+    val_data_path: "./data/9_species_V2_yeast_every_100.parquet" # read
     output_dir: test # write
     mode: # setting
       - a5
@@ -48,7 +48,7 @@ shap_calculator:
     base_samp: 200 # setting
     extra_samp: [20, 500] # setting
     bgd_sz: 100 # setting
-    inputs_ignored: 3 # read/setting: Trailing attributes to ignore for explanations in input vector
+    inputs_ignored: 2 # read/setting: Trailing attributes to ignore for explanations in input vector
     dataset_queries: # setting
       - "method == 'HCD'"
     bgd_queries: # setting
@@ -56,13 +56,13 @@ shap_calculator:
   
   # Reconstituting a saved torch model
   model_settings:
-    model_type: torch_pe # setting
+    model_type: mdlm # setting
     koina:
       model_path: Prosit_2024_intensity_PTMs_ac # setting/read
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/weights/model_epoch27_0.2910" # read
+      model_path: "/cmnfs/proj/diffusion/experiments/2025-10-14_17-25-21" # read
       ion_dict_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/filtered_ion_dict.csv" # read
       token_dict_path: "/cmnfs/proj/xai/token_dictionary.txt" # read
       yaml_dir_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/yaml" # read

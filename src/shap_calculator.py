@@ -10,24 +10,27 @@ from numpy.typing import NDArray
 import shap
 sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
+import src.utils as U
 from tqdm import tqdm
 
 class ShapCalculator:
     def __init__(
         self,
-        mode: List[str],
         dset: pd.DataFrame,
         bgd: pd.DataFrame,
         model_wrapper: ModelWrapper,
+        peptides: list = None,
         batch_size: int = 1000,
-        max_sequence_length: int = 30,
+        max_input_length: int = 50,
+        outputs: int = 40,
         max_charge: int = 6,
-        inputs_ignored: int = 3,
-        blank_token: str = '',
+        inputs_ignored: int = 2,
+        blank_token: int = 0,
     ):
         self.val = dset
         self.bgd = bgd
-        self.max_len = max_sequence_length
+        self.max_len = max_input_length
+        self.num_outputs = outputs + 1 
         self.max_charge = max_charge
         self.model_wrapper = model_wrapper
         self.inputs_ignored = inputs_ignored
@@ -36,16 +39,58 @@ class ShapCalculator:
 
         self.bgd_size = bgd.shape[0]
 
-        if mode[0] in ["rt", "cc", "fly1", "fly2", "fly3", "fly4",
-                       "charge1", "charge2", "charge3", "charge4", "charge5", "charge6"]:
-            self.ext = 0
-        else:
-            self.ext = {ion: int(ion[1:].split("+")[0].split('^')[0]) for ion in mode}
-        self.mode = mode
-        self.fnull = self.model_wrapper.make_prediction(bgd).mean(0)
+        self.mode = np.arange(self.num_outputs) # explanations for amino acids from 1 - num_outputs
+        self.fnull = np.zeros((self.num_outputs,)) #self.model_wrapper.make_prediction(bgd).mean(0)
 
-        self.savepep = []
-        self.savecv = []
+        self.process_spectra()
+        if peptides is not None:
+            self.process_peptide_sequences(peptides)
+
+    def process_spectra(self):
+        entire_dataset = np.zeros(( len(self.val), 2, self.max_len + self.inputs_ignored ))
+        pbar = tqdm(self.val.items(), total=len(self.val))
+        for iloc, (loc, linear_input) in enumerate(pbar):
+            pbar.set_description("Processing dataset into numpy tensors")
+            spectrum = linear_input[:-self.inputs_ignored].reshape(2, -1)
+            other = linear_input[-self.inputs_ignored:]
+            
+            # Top n peaks
+            spectrum = U.sort_array(spectrum, 1, descending=True, first=50)
+            spectrum = U.sort_array(spectrum, 0)
+            
+            # Place sorted spectrum inside new variable
+            actual_length = spectrum.shape[1]
+            tensor = np.zeros((2, self.max_len + self.inputs_ignored))
+            tensor[:, :actual_length] = spectrum
+            tensor[0, -self.inputs_ignored:] = other
+
+            entire_dataset[iloc] = tensor
+        
+        self.val = entire_dataset
+
+    def process_peptide_sequences(self, peptides):
+        self.answer = {
+            'modseq': [],
+            'aaseq': [],
+            'intseq': [],
+            'matched_ions': [],
+            'matched_mzs': [],
+        }
+        pbar = tqdm(peptides)
+        for i, peptide in enumerate(pbar):
+            pbar.set_description("Processing peptide sequences")
+            tokenized_sequence = model_wrapper.D.data.tokenizer(peptide)
+            intseq = [self.model_wrapper.D.data.amod_dic[m] for m in tokenized_sequence]
+            
+            matched_ions, matched_mzs, matched_inds = U.match(peptide, int(self.val[i, 0, -2]), self.val[i, 0, :-self.inputs_ignored])
+
+            self.answer['modseq'].append(peptide)
+            self.answer['aaseq'].append(tokenized_sequence)
+            self.answer['intseq'].append(intseq)
+            self.answer['matched_ions'].append(matched_ions)
+            self.answer['matched_mzs'].append(matched_mzs)
+
+        self.answer = pd.DataFrame(self.answer)
 
     def mask_pep(self, zs, pep, bgd_inds, mask=True) -> NDArray:
         BS, SL = zs.shape
@@ -54,28 +99,26 @@ class ShapCalculator:
         as dtype 'U1'. This array dtype silently truncated strings down to their first
         character, which was an issue for modified amino acid strings.
         """
-        out = np.tile(np.array(SL*[self.blank_token], dtype='U23')[None], [BS,1])
+        #out = np.tile(np.array(2, SL*[self.blank_token], dtype=np.float32)[None], [BS,1])
+        out = np.tile(np.array(SL*[self.blank_token], dtype=np.float32)[None, None], [BS,2,1])
+        zsexp = np.tile(zs[:,None], [1,2,1])
         if mask:
             
             ## Collect all peptide tokens that are 'on' and place them in the out tensor
-            oneinds = np.where(zs == 1)
+            oneinds = np.where(zsexp == 1) # np.tile(zs[:,None], [1,2,1]) == 1
             if len(oneinds[0]) > 0:
-                out[oneinds] = np.tile(pep, [BS, 1])[oneinds] # == out[oneinds] = pep[oneinds[1]]
+                out[oneinds] = np.tile(pep, [BS, 1, 1])[oneinds] # == out[oneinds] = pep[oneinds[1]]
             
             ## Replace all peptide tokens that are 'off' with background dataset
-            zeroinds = np.where(zs == 0)
+            zeroinds = np.where(zsexp == 0)
             if len(zeroinds[0]) > 0:
                 bgd_ = self.bgd[bgd_inds] # background dataset from batch_indices
+                bgd_ = np.tile(bgd_[:,None], [1,2,1])
                 out[zeroinds] = bgd_[zeroinds]
             
-            # pad c terminus with blanks
-            inds2 = (out==self.blank_token).argmax(1)
-            blanks = np.tile(np.arange(self.max_len)[None], [BS, 1]) >= inds2[:, None]
-            out[:,:self.max_len][blanks] = self.blank_token
+            # Place new null peaks at the end of the sequence (before ignored inputs)
+            out[:,:,:-self.inputs_ignored] = U.sort_array(out[:,:,:-self.inputs_ignored], 0, sub_values=[0, 1e9])
             
-            # TODO: Consider randomly elongating peptides if bgd example is longer
-            # TODO: Consider randomly turning truncated peptides into tryptic peptides
-
         else:
             out = pep
 
@@ -83,15 +126,15 @@ class ShapCalculator:
         # self.savecv.append(zs)
         return out
 
-    def ens_pred(self, pep, batsz=1000, mask=True):
+    def ens_pred(self, spec, batsz=1000, mask=True):
         # pep: coalition vectors, 1s and 0s; excludes absent AAs
-        shape = pep.shape
+        shape = spec.shape
 
         # Chunk into batches, each <= batsz
         batches = (
-            np.split(pep, np.arange(batsz, batsz * (shape[0] // batsz), batsz), 0)
+            np.split(spec, np.arange(batsz, batsz * (shape[0] // batsz), batsz), 0)
             if shape[0] % batsz == 0
-            else np.split(pep, np.arange(batsz, batsz * (shape[0] // batsz) + 1, batsz), 0)
+            else np.split(spec, np.arange(batsz, batsz * (shape[0] // batsz) + 1, batsz), 0)
         ) # -> List
 
         # Use these indices to substitute values from background dataset
@@ -128,9 +171,9 @@ class ShapCalculator:
 
         return out_
 
-    def score(self, peptide, mask=True):
-        shape = peptide.shape
-        x_ = self.ens_pred(peptide, self.batch_size, mask=mask)
+    def score(self, spectrum, mask=True):
+        shape = spectrum.shape
+        x_ = self.ens_pred(spectrum, self.batch_size, mask=mask)
         score = x_
         #if shape[0] == 1:
         #    score = np.array([score])[None, :]
@@ -142,13 +185,13 @@ class ShapCalculator:
         input_orig = sequence
         self.input_orig = input_orig
 
-        # Peptide length for the current peptide
+        # spectrum length for the current peptide
         num_ignored = self.inputs_ignored
-        peptide_length = sum(input_orig[0, :-num_ignored] != self.blank_token)
-        shap_vector_length = peptide_length + num_ignored
+        spectrum_length = sum(input_orig[0, 0, :-num_ignored] != self.blank_token)
+        shap_vector_length = spectrum_length + num_ignored
 
-        # Input coalition vector: All aa's on (1) + charge + eV
-        # - Padded amino acids are added in as all ones (always on) in ens_pred
+        # Input coalition vector: All peaks on (1) + charge + mass
+        # - Padded peaks are added in as all ones (always on) in ens_pred
         inpvec = np.ones((1, shap_vector_length))
 
         # Mask vector is peptide length all off
@@ -196,7 +239,9 @@ def save_shap_values(
     base_samp: int = 1000,
     extra_samp: List[int] = None,
     bgd_size: int = 100,
-    inputs_ignored: int = 3,
+    inputs_ignored: int = 2,
+    max_peaks: int = 50,
+    max_peptide_length = 40,
     dataset_queries: List[str] = None,
     bgd_queries: List[str] = None,
     batch_size: int = 1000,
@@ -207,7 +252,8 @@ def save_shap_values(
     # Load data
     val_data = pd.read_parquet(val_data_path)
     original_size = val_data.shape[0]
-
+    
+    """
     # Load existing split BEFORE querying dataset
     if bgd_loc_path is not None:
         print("<<<ATTN>>> Loading existing bgd split")
@@ -252,18 +298,23 @@ def save_shap_values(
     # Convert full column to numpy arrays
     bgd = np.stack(bgd['full'])
     val = np.stack(val_data.loc[remaining_indices]['full'])
-    
+    """
+    val = val_data['full']
+    peptides = val_data['modified_sequence'].to_list()
+    bgd = np.zeros((1, max_peaks))
+
     # NOTE: sequence length can be different than peptide length
-    max_sequence_length = val.shape[1] - inputs_ignored
+    max_input_length = max_peaks #val.shape[1] - inputs_ignored
 
     sc = ShapCalculator(
-        mode, 
         val, 
         bgd,
+        peptides=peptides,
         model_wrapper=model_wrapper,
         batch_size=batch_size,
         inputs_ignored=inputs_ignored,
-        max_sequence_length=max_sequence_length,
+        max_input_length=max_input_length,
+        outputs=max_peptide_length,
     )
     
     bgd_mean = pd.Series(sc.fnull, index=sc.mode)
@@ -336,7 +387,7 @@ if __name__ == "__main__":
     output_dir = config_["mode"] if config_['output_dir'] is None else config_['output_dir']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    os.system(f"cp config.yaml {output_dir}/")
+    os.system(f"cp {sys.argv[1]} {output_dir}/")
     
     # Model
     model_type = 'koina' if 'koina' in config['model_settings']['model_type'] else 'local'

@@ -585,6 +585,63 @@ class KoinaIRT(KoinaWrapper):
         return pred
 
 
+class MDLM(ModelWrapper):
+    def __init__(
+        self, 
+        model_path: Union[str, bytes, os.PathLike],
+        diffusion_steps: int=2,
+        ignored_inputs: int=2,
+        blank_token: float=0,
+        **kwargs
+    ):
+        self.ignored_inputs = ignored_inputs
+        self.blank_token = blank_token
+        self.diffusion_steps = diffusion_steps
+
+        from .denovo.main import DenovoMDLMObj
+        
+        with open(os.path.join(model_path, "yaml/config.yaml")) as stream:
+            config = yaml.safe_load(stream)
+        
+        config['prev_wts'] = model_path
+        config['load_last'] = False
+        rddir = config['prev_wts']
+        config['loader']['val_name'] = 'test'
+        D = DenovoMDLMObj(config, svdir='./', rddir=rddir)
+        D.model.eval()
+        D.model.decoder.diff_obj.steps = 2
+        self.D = D
+
+    def hx(self, twod_inputs):
+        # mz, ab, charge, mass, length (spectrum)
+        spectrum = twod_inputs[..., :-self.ignored_inputs]
+        mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
+        ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
+        other = twod_inputs[:, 0, -self.ignored_inputs:]
+        charge = th.tensor(other[:, 0], dtype=th.int32, device=device)
+        mass = th.tensor(other[:, 1], dtype=th.float32, device=device)
+        length = (mz != self.blank_token).sum(1)
+        batch = {
+            'mz': mz,
+            'ab': ab,
+            'charge': charge,
+            'mass': mass,
+            'length': length,
+        }
+        return batch
+
+    def make_prediction(self, inputs: ndarray):
+        batch = self.hx(inputs)
+        kwargs = {'save_x': True, 'save_p': True, 'progress': False, 'n': 1, 'top': 1, 'return_full': False}
+        out_dict = self.D.model.predict_sequence(batch, **kwargs)
+        reveal_steps = self.D.model.get_reveal_steps(out_dict['x_save']) # bs, sl
+        predicted_logit = out_dict['p_save'].gather(
+            -1, out_dict['prediction'][:,None,:,None].tile([1,self.diffusion_steps,1,1])
+        )[...,0].gather(
+            1, reveal_steps[:, None]
+        )[:,0]
+        return predicted_logit
+
 model_wrappers = {
     "torch_pe": TorchPE,
     "torch_prosit": TorchProsit,
@@ -594,4 +651,5 @@ model_wrappers = {
     "koina_ac": KoinaAC,
     "charge": ChargeStateWrapper,
     "flyability": FlyabilityWrapper,
+    'mdlm': MDLM,
 }
