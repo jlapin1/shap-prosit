@@ -12,7 +12,7 @@ using the function def hx(inputs).
 import os
 from abc import ABC, abstractmethod
 from time import sleep
-from typing import Union
+from typing import Union, List
 import warnings
 
 import pandas as pd
@@ -612,7 +612,7 @@ class MDLM(ModelWrapper):
         D.model.decoder.diff_obj.steps = 2
         self.D = D
 
-    def hx(self, twod_inputs):
+    def hx(self, twod_inputs: ndarray) -> dict:
         # mz, ab, charge, mass, length (spectrum)
         spectrum = twod_inputs[..., :-self.ignored_inputs]
         mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
@@ -629,6 +629,18 @@ class MDLM(ModelWrapper):
             'length': length,
         }
         return batch
+
+    def predict_peptide(self, inputs: ndarray) -> List[str]:
+        # Currently only working for batch_size == 1
+        batch = self.hx(inputs)
+        kwargs = {'save_x': False, 'save_p': False, 'progress': False, 'n': 1, 'top': 1, 'return_full': False}
+        predicted_intseq = self.D.model.predict_sequence(batch, **kwargs)['prediction'].squeeze()
+        
+        string2int = self.D.model.decoder.outdict
+        int2string = self.D.model.decoder.rev_outdict
+        dont_show = [string2int['X'], string2int['<EOS>'], string2int['<MASK>']]
+        
+        return [int2string[int(m)] for m in predicted_intseq if m not in dont_show]
 
     def make_prediction(self, inputs: ndarray):
         batch = self.hx(inputs)

@@ -3,49 +3,8 @@ shap_calculator:
   shap_settings:
     val_data_path: "./data/9_species_V2_yeast_every_100.parquet" # read
     output_dir: test # write
-    mode: # setting
-      - a5
-      - a9
-      - a5^2
-      - a9^2
-      - A5
-      - A9
-      - A5^2
-      - A9^2
-      - b5
-      - b9
-      - b5^2
-      - b9^2
-      - c5
-      - c9
-      - c5^2
-      - c9^2
-      - C5
-      - C9
-      - C5^2
-      - C9^2
-      - y5
-      - y9
-      - y5^2
-      - y9^2
-      - x5
-      - x9
-      - x5^2
-      - x9^2
-      - X5
-      - X9
-      - X5^2
-      - X9^2
-      - z5
-      - z9
-      - z5^2
-      - z9^2
-      - Z5
-      - Z9
-      - Z5^2
-      - Z9^2
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
-    base_samp: 200 # setting
+    base_samp: 100000 # setting
     extra_samp: [20, 500] # setting
     bgd_sz: 100 # setting
     inputs_ignored: 2 # read/setting: Trailing attributes to ignore for explanations in input vector
@@ -63,9 +22,7 @@ shap_calculator:
       ssl: False # setting
     local:
       model_path: "/cmnfs/proj/diffusion/experiments/2025-10-14_17-25-21" # read
-      ion_dict_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/filtered_ion_dict.csv" # read
-      token_dict_path: "/cmnfs/proj/xai/token_dictionary.txt" # read
-      yaml_dir_path: "/cmnfs/proj/xai/2025-03-12_16-29-27/yaml" # read
+      diffusion_steps: 2
   
 shap_visualization:
   mode: y5 # setting

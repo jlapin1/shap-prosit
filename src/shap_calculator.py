@@ -75,6 +75,7 @@ class ShapCalculator:
             'intseq': [],
             'matched_ions': [],
             'matched_mzs': [],
+            'matched_inds': [],
         }
         pbar = tqdm(peptides)
         for i, peptide in enumerate(pbar):
@@ -89,6 +90,7 @@ class ShapCalculator:
             self.answer['intseq'].append(intseq)
             self.answer['matched_ions'].append(matched_ions)
             self.answer['matched_mzs'].append(matched_mzs)
+            self.answer['matched_inds'].append(matched_inds)
 
         self.answer = pd.DataFrame(self.answer)
 
@@ -126,9 +128,10 @@ class ShapCalculator:
         # self.savecv.append(zs)
         return out
 
-    def ens_pred(self, spec, batsz=1000, mask=True):
+    def ens_pred(self, spec, batsz=1000, mask=True, silent=False):
         # pep: coalition vectors, 1s and 0s; excludes absent AAs
         shape = spec.shape
+        if shape[0] == 1: silent=True
 
         # Chunk into batches, each <= batsz
         batches = (
@@ -143,7 +146,9 @@ class ShapCalculator:
         bgd_indices = np.concatenate(rpts * [np.arange(self.bgd_size, dtype=np.int32)], axis=0)
 
         out_ = []
-        for I, batch in enumerate(batches):
+        pbar = batches if silent==True else tqdm(batches)
+        for I, batch in enumerate(pbar):
+            if not silent: pbar.set_description("ens_pred loop")
             # AAs (cut out CE, charge)
             # Absent AAs (all 1s)
             # [CE, CHARGE]
@@ -165,7 +170,7 @@ class ShapCalculator:
 
             # Run through model
             out = self.model_wrapper.make_prediction(inp)
-            out_.append(out)
+            out_.append(out.cpu().numpy())
 
         out_ = np.concatenate(out_, axis=0)
 
@@ -193,6 +198,11 @@ class ShapCalculator:
         # Input coalition vector: All peaks on (1) + charge + mass
         # - Padded peaks are added in as all ones (always on) in ens_pred
         inpvec = np.ones((1, shap_vector_length))
+        
+        # Get model's predicted peptide 
+        # - Reminder: diffusion models are non-deterministic
+        predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig)
+        print(f"Predicted peptide: {''.join(predicted_aa_list)}")
 
         # Mask vector is peptide length all off
         # - By turning the ignored inputs on, I am ignoring there contribution
@@ -206,34 +216,20 @@ class ShapCalculator:
 
         # Calculate the SHAP values
         shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
-        
-        # Other outputs to save
-        seq = list(input_orig.squeeze())
-        seqrep = seq[:peptide_length]
-        original_intensity = self.ens_pred(inpvec, self.batch_size, mask=False)
-        too_short = False if self.ext == 0 else peptide_length <= np.array(list(self.ext.values()))
-        # Identify impossible sequences by setting intensity to -1
-        original_intensity[:, too_short] = -1
-
-        shap_values = np.array(shap_values)
-        if self.ext == 0:
-            shap_values = np.transpose(shap_values, axes=(1, 2, 0))
-
-        # TODO Find a dynamic way of including arbitrary number non-sequence items
+        shap_values = np.array(shap_values[0])
 
         return {
-            "intensity": pd.Series(original_intensity.squeeze(), index=self.mode),
-            "shap_values": pd.DataFrame(shap_values[0, :peptide_length], columns=self.mode),
-            "sequence": seqrep,
-            "charge": int(seq[-3]),
-            "energy": float(seq[-2]),
-            "method": seq[-1],
+            "mz": input_orig[0, 0, :-self.inputs_ignored].astype(np.float32),
+            "intensity": input_orig[0, 1, :-self.inputs_ignored].astype(np.float32),
+            "charge": int(input_orig[0, 0, -2]),
+            "mass": float(input_orig[0, 0, -1]),
+            "pred_aaseq": predicted_aa_list,
+            "shap_values": pd.DataFrame(shap_values, columns=self.mode),
         }
 
 def save_shap_values(
     val_data_path: Union[str, bytes, os.PathLike],
     model_wrapper: ModelWrapper,
-    mode: str,
     output_path: Union[str, bytes, os.PathLike] = ".",
     bgd_loc_path: Union[str, bytes, os.PathLike] = None,
     base_samp: int = 1000,
@@ -320,17 +316,7 @@ def save_shap_values(
     bgd_mean = pd.Series(sc.fnull, index=sc.mode)
     
     # TODO arbitrary number of non-sequence items
-    result = {
-        "sequence": [],
-        #"peptide_length": [],
-        "energy": [],
-        "charge": [],
-        "method": [],
-    }
-    for mode_ in sc.mode:
-        result[f'bgd_mean_{mode_}'] = []
-        result[f'intensity_{mode_}'] = []
-        result[f'shap_values_{mode_}'] = []
+    result = {}
     
     pbar = tqdm(range(val.shape[0]))
     for INDEX in pbar:
@@ -338,37 +324,52 @@ def save_shap_values(
         sequence = sc.val[INDEX : INDEX + 1]
         
         # Set sampling amount
-        if extra_samp is not None:
+        """if extra_samp is not None:
             explain_length = sum(sequence.squeeze()[:-inputs_ignored] != sc.blank_token)
             if explain_length >= extra_samp[0]:
                 Samp = extra_samp[1]
             else:
                 Samp = base_samp
         else:
-            Samp = base_samp
+            Samp = base_samp"""
+        Samp = base_samp
 
         # Calculate shapley values
         out_dict = sc.calc_shap_values(sequence, samp=Samp)
         # add to out_dict to include in output
-        out_dict['peptide_length'] = val_data['peptide_length'].iloc[INDEX]
+        
+        # Create sparse arrays for shapley values by mode
+        shap_results = {}
+        shap_values = out_dict.pop("shap_values")
+        for column in shap_values:
+            ind_col_name = f"sv_indices_{column}"
+            mode_indices = np.where(shap_values[column] != sc.blank_token)[0].astype(np.int16)
+            shap_results[ind_col_name] = mode_indices
+            sv_col_name = f"sv_values_{column}"
+            mode_shap_values = shap_values[column].iloc[mode_indices].to_numpy().astype(np.float32)
+            shap_results[sv_col_name] = mode_shap_values
+        
+        # Add answer data
+        addons = {}
+        if hasattr(sc, 'answer'):
+            answer_dict = sc.answer.iloc[INDEX].to_dict()
+            for key in answer_dict:
+                addons[f"answer_{key}"] = answer_dict[key]
+        else:
+            addons = {}
+
+
+        new_dict = out_dict | shap_results | addons
 
         # Save results
-        if out_dict != False:
-            for key, value in result.items():
-                if "bgd_mean" in key:
-                    mode = key.split('_')[-1]
-                    value.append(bgd_mean[mode])
-                elif 'intensity' in key:
-                    mode = key.split('_')[-1]
-                    value.append(out_dict['intensity'][mode])
-                elif 'shap' in key:
-                    mode = key.split('_')[-1]
-                    value.append(out_dict['shap_values'][mode].to_list())
-                else:
-                    value.append(out_dict[key])
+        if new_dict != False:
+            for key, value in new_dict.items():
+                if key not in result:
+                    result[key] = []
+                result[key].append(value)
         
         # Dump results every 100 explanations to be safe
-        if (INDEX+1) % 100 == 0:
+        if (INDEX+1) % 1 == 0:
             pd.DataFrame(result).to_parquet(
                 output_path + "/output.parquet", compression="gzip"
             )
@@ -392,7 +393,6 @@ if __name__ == "__main__":
     # Model
     model_type = 'koina' if 'koina' in config['model_settings']['model_type'] else 'local'
     model_wrapper = model_wrappers[config['model_settings']["model_type"]](
-        mode=config['shap_settings']["mode"],
         **config['model_settings'][model_type],
     )
     
