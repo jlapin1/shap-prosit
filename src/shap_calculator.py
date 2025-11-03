@@ -73,9 +73,9 @@ class ShapCalculator:
             'modseq': [],
             'aaseq': [],
             'intseq': [],
-            'matched_ions': [],
-            'matched_mzs': [],
-            'matched_inds': [],
+            #'matched_ions': [],
+            #'matched_mzs': [],
+            #'matched_inds': [],
         }
         pbar = tqdm(peptides)
         for i, peptide in enumerate(pbar):
@@ -83,14 +83,14 @@ class ShapCalculator:
             tokenized_sequence = model_wrapper.D.data.tokenizer(peptide)
             intseq = [self.model_wrapper.D.data.amod_dic[m] for m in tokenized_sequence]
             
-            matched_ions, matched_mzs, matched_inds = U.match(peptide, int(self.val[i, 0, -2]), self.val[i, 0, :-self.inputs_ignored])
+            #matched_ions, matched_mzs, matched_inds = U.match(peptide, int(self.val[i, 0, -2]), self.val[i, 0, :-self.inputs_ignored])
 
             self.answer['modseq'].append(peptide)
             self.answer['aaseq'].append(tokenized_sequence)
             self.answer['intseq'].append(intseq)
-            self.answer['matched_ions'].append(matched_ions)
-            self.answer['matched_mzs'].append(matched_mzs)
-            self.answer['matched_inds'].append(matched_inds)
+            #self.answer['matched_ions'].append(matched_ions)
+            #self.answer['matched_mzs'].append(matched_mzs)
+            #self.answer['matched_inds'].append(matched_inds)
 
         self.answer = pd.DataFrame(self.answer)
 
@@ -202,7 +202,7 @@ class ShapCalculator:
         # Get model's predicted peptide 
         # - Reminder: diffusion models are non-deterministic
         predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig)
-        print(f"Predicted peptide: {''.join(predicted_aa_list)}")
+        #print(f"Predicted peptide: {''.join(predicted_aa_list)}")
 
         # Mask vector is peptide length all off
         # - By turning the ignored inputs on, I am ignoring there contribution
@@ -318,7 +318,7 @@ def save_shap_values(
     # TODO arbitrary number of non-sequence items
     result = {}
     
-    pbar = tqdm(range(val.shape[0]))
+    pbar = tqdm(range(0, val.shape[0], 1))
     for INDEX in pbar:
         pbar.set_description("Calculating SHAP explanations")
         sequence = sc.val[INDEX : INDEX + 1]
