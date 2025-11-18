@@ -32,11 +32,15 @@ def IONS(
     add_immonium=False, 
     add_precursor=False,
     add_internals=False,
+    custom_adds=[],
 ):
     ions = []
     charges  = [f'^{c}' for c in range(1, max_charge+1, 1)]
     charges[0]=''
-    if neutral_losses[0] != '': neutral_losses.insert(0, '')
+    if len(neutral_losses) > 0: 
+        neutral_losses.insert(0, '')
+    else: 
+        neutral_losses = ['']
     for ion in ion_series:
         for length in range(1, max_length, 1):
             for charge in charges:
@@ -57,6 +61,9 @@ def IONS(
             for nl in internal_neutral_losses:
                 ions.extend([f"Int{start}>{2}-{nl}" for start in range(1, max_length-2, 1)])
                 ions.extend([f"Int{start}>{3}-{nl}" for start in range(1, max_length-3, 1)])
+    for addon in custom_adds:
+        if addon not in ions:
+            ions.append(addon)
     
     ions = np.array(ions)
     return ions
