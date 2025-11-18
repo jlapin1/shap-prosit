@@ -12,6 +12,7 @@ sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
 import src.utils as U
 from tqdm import tqdm
+import re
 
 class ShapCalculator:
     def __init__(
@@ -185,7 +186,7 @@ class ShapCalculator:
 
         return score
 
-    def calc_shap_values(self, sequence, samp=1000):
+    def calc_shap_values(self, sequence, samp=1000, **kwargs):
         # String array
         input_orig = sequence
         self.input_orig = input_orig
@@ -203,6 +204,10 @@ class ShapCalculator:
         # - Reminder: diffusion models are non-deterministic
         predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig)
         #print(f"Predicted peptide: {''.join(predicted_aa_list)}")
+        if 'peptide' in kwargs:
+            correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', kwargs['peptide'])
+            if not correct:
+                return False
 
         # Mask vector is peptide length all off
         # - By turning the ignored inputs on, I am ignoring there contribution
@@ -324,18 +329,12 @@ def save_shap_values(
         sequence = sc.val[INDEX : INDEX + 1]
         
         # Set sampling amount
-        """if extra_samp is not None:
-            explain_length = sum(sequence.squeeze()[:-inputs_ignored] != sc.blank_token)
-            if explain_length >= extra_samp[0]:
-                Samp = extra_samp[1]
-            else:
-                Samp = base_samp
-        else:
-            Samp = base_samp"""
         Samp = base_samp
 
         # Calculate shapley values
-        out_dict = sc.calc_shap_values(sequence, samp=Samp)
+        out_dict = sc.calc_shap_values(sequence, samp=Samp, peptide=peptides[INDEX])
+        if out_dict == False:
+            continue
         # add to out_dict to include in output
         
         # Create sparse arrays for shapley values by mode

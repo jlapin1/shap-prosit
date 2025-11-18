@@ -1,11 +1,10 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "./data/9_species_V2_yeast_every_100.parquet" # read
+    val_data_path: "./data/kingdoms_yeast.parquet" # read
     output_dir: test # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
-    extra_samp: [20, 500] # setting
     bgd_sz: 100 # setting
     inputs_ignored: 2 # read/setting: Trailing attributes to ignore for explanations in input vector
     dataset_queries: # setting
@@ -21,8 +20,8 @@ shap_calculator:
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/diffusion/experiments/2025-10-14_17-25-21" # read
-      diffusion_steps: 2
+      model_path: "/cmnfs/proj/diffusion/experiments/2025-11-04_06-47-44" # read
+      diffusion_steps: 1
   
 shap_visualization:
   mode: y5 # setting

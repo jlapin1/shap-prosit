@@ -609,7 +609,7 @@ class MDLM(ModelWrapper):
         config['loader']['val_name'] = 'test'
         D = DenovoMDLMObj(config, svdir='./', rddir=rddir)
         D.model.eval()
-        D.model.decoder.diff_obj.steps = 2
+        D.model.decoder.diff_obj.steps = diffusion_steps
         self.D = D
 
     def hx(self, twod_inputs: ndarray) -> dict:

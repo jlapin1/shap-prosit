@@ -248,8 +248,14 @@ class LoaderHF(LoaderObj):
             reverse=reverse,
         )
         if 'remove_columns' in kwargs:
-            remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
-            remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
+            try:
+                remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
+            except:
+                remove_train_columns = []
+            try:
+                remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
+            except:
+                remove_val_columns = []
         else:
             remove_train_columns = []
             remove_val_columns = []
