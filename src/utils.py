@@ -32,24 +32,22 @@ def IONS(
     add_immonium=False, 
     add_precursor=False,
     add_internals=False,
+    isotope_degree=0,
     custom_adds=[],
 ):
     ions = []
     charges  = [f'^{c}' for c in range(1, max_charge+1, 1)]
     charges[0]=''
-    if len(neutral_losses) > 0: 
-        neutral_losses.insert(0, '')
-    else: 
-        neutral_losses = ['']
+    neutral_losses_ =  [''] + neutral_losses
+    isotopes = [f"+{i}i" if i>1 else ('+i' if i==1 else '') for i in range(0,isotope_degree+1,1)]
     for ion in ion_series:
         for length in range(1, max_length, 1):
             for charge in charges:
-                for nl in neutral_losses:
-                    if nl != '': 
-                        nl = '-' + nl
-                    #if ion.lower() == 'a':
-                    #    nl = ''
-                    ions.append(f"{ion}{length}{nl}{charge}")
+                for nl in neutral_losses_:
+                    for isotope in isotopes:
+                        
+                        nl_ = '-' + nl if nl != '' else nl
+                        ions.append(f"{ion}{length}{nl_}{charge}{isotope}")
     if add_immonium:
         ions.extend(IMMONIUM_IONS)
     if add_precursor:
@@ -71,24 +69,18 @@ def IONS(
 def calc_masses(modseq, charge, ions):
     return np.array([scale.calcmass(modseq, charge, ion) for ion in ions])
 
-def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, breaktie=True):
+def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, threshold=10, breaktie=True):
     real_masses = np.array(real_masses)
     real_masses = real_masses[real_masses!=0]
     ions = IONS(len(split_aa_sequence), charge, **IONS_kwargs)
     modseq = "".join(split_aa_sequence)
     modseq = convert_to_unimod(modseq)
     possible = calc_masses(modseq, charge, ions)
-    TP,_,_ = scale.match(possible, real_masses)
+    TP,_,_ = scale.match(possible, real_masses, thr=threshold)
     if breaktie:
         theor_df = pd.DataFrame({'ion': ions, 'mz': possible})
         TP = tiebreak(TP, theor_df, real_masses)
     found_ions = ions[TP[0]]
-    """found_fragments = [
-        list(np.array((intseq[:int(ion.split('^')[0].split('-')[0][1:])] 
-                       if 'b' in ion else 
-                       intseq[-int(ion.split('^')[0].split('-')[0][1:]):]))) 
-        for ion in found_ions
-    ]"""
     found_mzs = real_masses[TP[1]]
     return found_ions, found_mzs, TP[1]
 

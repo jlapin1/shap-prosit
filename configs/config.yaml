@@ -2,7 +2,7 @@ shap_calculator:
   # SHAP calculation settings
   shap_settings:
     val_data_path: "./data/kingdoms_yeast.parquet" # read
-    output_dir: test # write
+    output_dir: kingdoms_yeast # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
     bgd_sz: 100 # setting
