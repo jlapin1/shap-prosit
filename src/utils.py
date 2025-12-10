@@ -53,6 +53,7 @@ def IONS(
     if add_precursor:
         ions.extend(['p', 'p+i', 'p^2'])
     if add_internals:
+        ions.extend([f"Int{start}>{1}" for start in range(1, max_length-1, 1)])
         ions.extend([f"Int{start}>{2}" for start in range(1, max_length-2, 1)])
         ions.extend([f"Int{start}>{3}" for start in range(1, max_length-3, 1)])
         if len(internal_neutral_losses) > 0:
