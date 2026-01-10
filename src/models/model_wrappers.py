@@ -617,6 +617,7 @@ class MDLM(ModelWrapper):
         spectrum = twod_inputs[..., :-self.ignored_inputs]
         mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
         ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
+        ab /= ab.max()
         other = twod_inputs[:, 0, -self.ignored_inputs:]
         charge = th.tensor(other[:, 0], dtype=th.int32, device=device)
         mass = th.tensor(other[:, 1], dtype=th.float32, device=device)
