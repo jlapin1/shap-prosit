@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import re
+from operator import itemgetter
 import sys
 sys.path.append("/cmnfs/home/j.lapin/projects/shabaz/data")
 from mass_scale import Scale, tiebreak
@@ -70,14 +71,14 @@ def IONS(
 def calc_masses(modseq, charge, ions):
     return np.array([scale.calcmass(modseq, charge, ion) for ion in ions])
 
-def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, threshold=10, breaktie=True):
+def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, threshold=10, spl=[400,500], breaktie=True):
     real_masses = np.array(real_masses)
     real_masses = real_masses[real_masses!=0]
     ions = IONS(len(split_aa_sequence), charge, **IONS_kwargs)
     modseq = "".join(split_aa_sequence)
     modseq = convert_to_unimod(modseq)
     possible = calc_masses(modseq, charge, ions)
-    TP,_,_ = scale.match(possible, real_masses, thr=threshold)
+    TP,_,_ = scale.match(possible, real_masses, thr=threshold, spl=spl)
     if breaktie:
         theor_df = pd.DataFrame({'ion': ions, 'mz': possible})
         TP = tiebreak(TP, theor_df, real_masses)
