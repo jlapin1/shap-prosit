@@ -15,9 +15,9 @@ from torch import Tensor
 
 #import dataloader
 #import models
-from . import noise_schedule as noise_schedule
-from . import ema as ema
-from . import utils as utils
+import ...models.mdlm.noise_schedule as noise_schedule
+import ...models.mdlm.ema as ema
+import ...models.mdlm.utils as utils
 from tqdm.auto import tqdm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -87,13 +87,13 @@ class Diffusion:
     self.change_of_variables = self.config['training']['change_of_variables']
     
     self.mask_index = dictionary['<MASK>']
-    self.bos_token_id = dictionary['<SOS>']
     self.eos_token_id = dictionary['<EOS>']
     self.NT = dictionary['X']
     self.parameterization = self.config['parameterization']
     
     self.backbone = backbone
     self.device = device
+    self.dtype = torch.float32
 
     self.T = self.config['T']
     self.subs_masking = self.config['subs_masking']
@@ -282,7 +282,7 @@ class Diffusion:
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
     with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
-      logits = self.backbone(x, **model_kwargs)
+      logits = self.backbone(x, **model_kwargs)['out']
     
     if self.parameterization == 'subs':
       out = self._subs_parameterization(logits=logits.clone(),
@@ -294,7 +294,7 @@ class Diffusion:
                                          xt=x,
                                          sigma=sigma)
     elif self.parameterization == 'd3pm':
-      return self._d3pm_parameterization(logits=logits)
+      return self._d3pm_parameterization(logits=logits), logits
     
     return logits, None
 
@@ -628,9 +628,17 @@ class Diffusion:
       x[:, i + 1] = y
     return x
 
+  def fill_null(self, x):
+      A,B = torch.where(x==self.eos_token_id)
+      msk = torch.arange(x.shape[1], device=x.device)[None].tile([x.shape[0], 1])
+      C,D = torch.where(msk[A] > B[:,None])
+      x[A.gather(0, C), D] = self.NT
+      return x
+
   @torch.no_grad()
   def _sample(
-      self, 
+      self,
+      x=None,
       num_steps=None, 
       eps=1e-5,
       top=None,
@@ -649,7 +657,8 @@ class Diffusion:
           num_steps = self.steps
       
       # Initialize variables
-      x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
+      if x == None:
+          x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
       if self.config['sampling']['sampler'] == 'cosine':
           # Delays unmasking
           timesteps = CosineSampler(num_steps)
@@ -666,7 +675,7 @@ class Diffusion:
       p_x0_cache = None
       if self.config['model']['self_condition']:
           model_kwargs['self_conditions'] = torch.zeros(
-              batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
+              batch_size_per_gpu, x.shape[1], self.vocab_size, device=self.device
           )
       if save_x:
           xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
@@ -720,6 +729,99 @@ class Diffusion:
           output['p_save'] = psave.transpose(0,1)
       
       return output
+
+  #def _sample(
+  #  self,
+  #  x=None,
+  #  eps=1e-5,
+  #  num_steps=0,
+  #  model_kwargs={},
+  #  save_x=False,
+  #  save_p=False,
+  #  progress=False,
+  #  **kwargs
+  #):
+  #  batch_size_per_gpu = len(model_kwargs['charge'])
+  #  
+  #  # Initialize variables
+  #  if self.backbone.block_size is not None:
+  #      x_ = self._sample_prior(batch_size_per_gpu, self.backbone.block_size).to(self.device)
+  #      if x is not None:
+  #          # Extending the sequence
+  #          x = torch.cat([x, x_], dim=1)
+  #      else:
+  #          # Starting off
+  #          x = x_
+  #  else:
+  #      x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
+  #  #steps_btw = num_steps
+  #  num_steps = self.SL #(1+num_steps)*self.SL
+  #  timesteps = torch.linspace(1, eps, num_steps, device=self.device)
+
+  #  p_x0_cache = None
+  #  if self.config['model']['self_condition']:
+  #    model_kwargs['self_conditions'] = torch.zeros(
+  #      batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
+  #    )
+  #  if save_x:
+  #    xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
+  #    xsave[0] = x
+  #  if save_p: 
+  #    psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
+  #    
+  #  pbar = tqdm(range(num_steps)) if progress else range(num_steps)
+  #  for i in pbar:
+  #    # Timestep
+  #    t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
+  #    if t.ndim > 1:
+  #      t = t.squeeze(-1)
+  #    sigma_t, _ = self.noise(t)
+  #      
+  #    # Model forward pass
+  #    if p_x0_cache is None:
+  #      logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
+  #      p_x0 = logp_x0.exp()
+  #      p_x0_ = p_x0[...,:-1]
+  #      
+  #      # Set self-conditions
+  #      if self.config['model']['self_condition']:
+  #        model_kwargs['self_conditions'] = logits
+  #      
+  #      if True:#i % (steps_btw+1) == 0:
+  #          # Automatic switchovers
+  #          auto_unmask = p_x0 > self.config['sampling']['max_prob']
+  #          where = torch.where(auto_unmask)
+  #          x[where[0], where[1]] = where[2]
+  #          
+  #          maxlog, maxcat = p_x0.max(-1)
+  #          maxlog[x!=self.mask_index] = 0
+  #          maxlog2, maxind = maxlog.max(-1)
+  #          bd = torch.arange(len(maxind), device=self.device)
+  #          x[bd, maxind] = maxcat[bd, maxind]
+  #      if (x!=self.mask_index).all():
+  #          break
+  #      
+  #      if save_p: 
+  #          psave[i] = p_x0
+  #      #if (not torch.allclose(x_next, x) or self.time_conditioning):
+  #      #    # Disable caching
+  #      #    p_x0_cache = None
+  #      #    x = x_next
+  #      #else:
+  #      #    x = self._analytic_update(x, t, dt)
+  #      if save_x: 
+  #          xsave[i+1] = x
+  #    
+  #  assert (x!=self.mask_index).all()
+
+  #  # Output
+  #  output = {'prediction': x, 'logits': logits}
+  #  if save_x:
+  #    output['x_save'] = xsave.transpose(0,1)
+  #  if save_p:
+  #    output['p_save'] = psave.transpose(0,1)
+  #    
+  #  return output
 
   def restore_model_and_sample(self, num_steps, eps=1e-5):
     """Generate samples from the model."""
@@ -857,19 +959,21 @@ class Diffusion:
       new_attention_mask = attention_mask
     return input_tokens, output_tokens, new_attention_mask
 
-  def _reconstruction_loss(self, x0):
+  def _reconstruction_loss(self, x0, model_kwargs={}):
     t0 = torch.zeros(x0.shape[0], dtype=self.dtype,
                      device=self.device)
-    assert self.config.noise.type == 'loglinear'
+    assert self.config['noise']['type'] == 'loglinear'
     # The above assert is for d3pm parameterization
     unet_conditioning = self.noise(t0)[0][:, None]
-    model_output_t0 = self.forward(x0, unet_conditioning)
+    model_output_t0 = self.forward(x0, unet_conditioning, model_kwargs=model_kwargs)[0]
     return - torch.gather(input=model_output_t0,
                           dim=-1,
                           index=x0[:, :, None]).squeeze(-1)
 
-  def _forward_pass_diffusion(self, backbone, x0, model_kwargs):
-    t = self._sample_t(x0.shape[0], x0.device)#[torch.randperm(x0.shape[0])]
+  def _forward_pass_diffusion(self, backbone, x0, model_kwargs, block_training=False):
+    bs, sl = x0.shape
+
+    t = self._sample_t(bs, x0.device)#[torch.randperm(x0.shape[0])]
     if self.T > 0:
       t = (t * self.T).to(torch.int)
       t = t / self.T
@@ -887,21 +991,31 @@ class Diffusion:
       model_kwargs['timesteps'] = sigma if self.time_conditioning else torch.zeros_like(sigma)
       move_chance = 1 - torch.exp(-sigma[:, None])
     
-    #within = (torch.where(x0 == self.eos_token_id)[1]+1)[:,None] > torch.arange(x0.shape[1], device=device)[None].tile([x0.shape[0],1])
-    #multiplier = torch.where(within, 1.0, ~within * t[:,None].clamp(0.5, 0.9)) # t*t < t
-    #move_chance = move_chance * multiplier
     xt = self.q_xt(x0, move_chance)
+    masked_token_mask = xt==self.mask_index
+    if block_training:
+        xt = torch.cat([xt, x0], dim=1)
 
     if self.config['model']['self_condition']:
-        model_kwargs['self_conditions'] = torch.zeros(x0.shape[0], x0.shape[1], self.vocab_size, device=device)
+        model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
         if np.random.uniform() > 0.5:
             with torch.no_grad():
-                model_output = backbone(xt, **model_kwargs)
+                model_output = backbone(xt, **model_kwargs)['out']
             model_kwargs['self_conditions'] = model_output.detach()
     
-    model_output = backbone(xt, **model_kwargs)
+    model_output = (
+        backbone(xt, **model_kwargs)['out']
+        if self.config['custom_loss'] else
+        self.forward(xt, sigma[:, None], model_kwargs=model_kwargs)[0]
+    )
+
+    if block_training:
+        model_output = model_output[:, :sl]
+        masked_token_mask = masked_token_mask[:, :sl]
     utils.print_nans(model_output, 'model_output')
-    return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index, t
+    
+    if self.config['custom_loss']:
+        return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
     
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(
@@ -911,10 +1025,12 @@ class Diffusion:
       diffusion_loss = self._d3pm_loss(
         model_output=model_output, xt=xt, x0=x0, t=t)
       if self.parameterization == 'd3pm':
-        reconstruction_loss = self._reconstruction_loss(x0)
+        if self.config['model']['self_condition']:
+            model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
+        reconstruction_loss = self._reconstruction_loss(x0, model_kwargs=model_kwargs)
       elif self.parameterization == 'subs':
-        reconstruction_loss = 0
-      return reconstruction_loss + diffusion_loss
+        reconstruction_loss = torch.zeros(())
+      return reconstruction_loss + diffusion_loss, {'reconstruction_loss': reconstruction_loss.mean().item(), 'diffusion_loss': diffusion_loss.mean().item()}
     
     # SUBS parameterization, continuous time.
     log_p_theta = torch.gather(
@@ -927,7 +1043,7 @@ class Diffusion:
         - torch.exp(- self.noise.sigma_min))
     
     return - log_p_theta * (
-      dsigma / torch.expm1(sigma))[:, None]
+      dsigma / torch.expm1(sigma))[:, None], {}
 
   def _loss(self, x0, attention_mask):
     (input_tokens, output_tokens,

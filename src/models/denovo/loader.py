@@ -2,7 +2,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 import torch as th
 import os
-import utils
+import .utils
 import re
 from glob import glob
 import sys
@@ -27,42 +27,37 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
     example['intensity_array'] = ab_
     example['precursor_charge'] = example['precursor_charge']
     example['precursor_mass'] = example['precursor_mass']
-    example['spectrum_length'] = len(example['mz_array'])
-    tokenized_sequence = tokenizer(example['modified_sequence'])
-    peptide_length = len(tokenized_sequence)
-    if reverse:
-        tokenized_sequence = tokenized_sequence[::-1]
-    example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
-    example['peptide_length'] = peptide_length
-    example['spectrum_length'] = spectrum_length
+    example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+    if 'modified_sequence' in example:
+        tokenized_sequence = tokenizer(example['modified_sequence'])
+        peptide_length = len(tokenized_sequence)
+        if reverse:
+            tokenized_sequence = tokenized_sequence[::-1]
+        example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
+        example['peptide_length'] = peptide_length
     if 'name' in example: example['experiment_name'] = example['name'] # compat
 
     return example
 
-def collate_fn(batch_list):
-    species = [m['experiment_name'] for m in batch_list]
-    speclen = np.stack([m['spectrum_length'] for m in batch_list])
-    mz = np.stack([m['mz_array'][:speclen.max()] for m in batch_list])
-    ab = np.stack([m['intensity_array'][:speclen.max()] for m in batch_list])
-    charge = np.stack([m['precursor_charge'] for m in batch_list])
-    mass = np.stack([m['precursor_mass'] for m in batch_list])
-    peplen = np.stack([m['peptide_length'] for m in batch_list])
-    intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
-    chimeric = np.stack([m['chimeric'] for m in batch_list]) if 'chimeric' in batch_list[0].keys() else []
-    hyperscore = np.stack([m['Hyperscore'] for m in batch_list]) if 'Hyperscore' in batch_list[0].keys() else []
-
-    out = {
-        'experiment_name': species,
-        'mz': th.tensor(mz, dtype=th.float32),
-        'ab': th.tensor(ab, dtype=th.float32),
-        'charge': th.tensor(charge, dtype=th.int32),
-        'mass': th.tensor(mass, dtype=th.float32),
-        'length': th.tensor(speclen, dtype=th.int32),
-        'intseq': th.tensor(intseq, dtype=th.int32),
-        'peplen': th.tensor(peplen, dtype=th.int32),
-        'chimeric': chimeric,
-        'hyperscore': hyperscore,
-    }
+def collate_fn(batch_list, custom_columns=[]):
+    out = {}
+    out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
+    out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
+    maxlength = out['length'].max()
+    out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
+    out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
+    if 'tokenized_sequence' in batch_list[0].keys():
+        out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
+        out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
+        #out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:41] for m in batch_list]), dtype=th.int32)
+    if 'chimeric' in batch_list[0].keys():
+        out['chimeric'] = th.tensor(np.stack([m['chimeric'] for m in batch_list]))
+    if 'Hyperscore' in batch_list[0]:
+        out['hyperscore'] = th.tensor(np.stack([m['Hyperscore'] for m in batch_list]))
+    for column in custom_columns:
+        out[column] = np.array([m[column] for m in batch_list])
 
     return out
 
@@ -88,8 +83,8 @@ class LoaderObj:
         return {b:a for a,b in amod_dic.items()}
 
     def synonym(self, token1, token2, amod_dic):
-        low = np.minimum(amod_dic[token1], amod_dic[token2])
-        high = np.maximum(amod_dic[token1], amod_dic[token2])
+        low = int(np.minimum(amod_dic[token1], amod_dic[token2]))
+        high = int(np.maximum(amod_dic[token1], amod_dic[token2]))
         amod_dic[token1] = amod_dic[token2] = low
         amod_dic = {key:value if value < high else value-1 for key, value in amod_dic.items()}
         return amod_dic
@@ -180,20 +175,24 @@ class LoaderHF(LoaderObj):
         tokenizer_path: str=None,
         test_split_method: str='full_val',
         top_pks: int=100,
+        pep_length: list=[0,40],
         reverse: bool=False,
         batch_size: int=100,
         num_workers: int=0,
+        custom_columns: list=[],
+        datapath_extension="parquet/processed",
         **kwargs
     ):
 
-        dpe = "parquet/processed"
+        dpe = "parquet/processed" if datapath_extension is None else datapath_extension
+        self.custom_columns = []
 
         if val_dataset_path is None:
             val_dataset_path = train_dataset_path
         if masses_path is None:
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
-        max_seq = kwargs['pep_length'][1] if 'pep_length' in kwargs.keys() else None
+        max_seq = pep_length[1] if pep_length is not None else None
         
         ##############
         # Dictionary #
@@ -219,8 +218,8 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
         #   2. val_name will pick out 1 file's size from the val_dataset_path
-        self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name, "*species*size*tsv")
-        self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name, regex="*species*size*tsv")
+        self.train_size = self.find_set_size_for_tqdm(join(train_dataset_path, dpe), train_name, val_name, "*species*size*tsv")
+        self.val_size = self.find_set_size_for_tqdm(join(val_dataset_path, dpe), val_name, regex="*species*size*tsv")
         
         ###########
         # Dataset #
@@ -248,14 +247,8 @@ class LoaderHF(LoaderObj):
             reverse=reverse,
         )
         if 'remove_columns' in kwargs:
-            try:
-                remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
-            except:
-                remove_train_columns = []
-            try:
-                remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
-            except:
-                remove_val_columns = []
+            remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
+            remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
         else:
             remove_train_columns = []
             remove_val_columns = []
@@ -288,14 +281,6 @@ class LoaderHF(LoaderObj):
         #############
         # Filtering #
         #############
-        # Filter for length
-        if 'pep_length' in kwargs.keys():
-            dataset = dataset.filter(
-                lambda example: 
-                (len(example['tokenized_sequence']) >= kwargs['pep_length'][0]) &
-                (len(example['tokenized_sequence']) <= kwargs['pep_length'][1])
-            )
-        
         # Filter for charge
         if 'charge' in kwargs.keys():
             dataset = dataset.filter(
@@ -303,15 +288,28 @@ class LoaderHF(LoaderObj):
                 (example['precursor_charge'] >= kwargs['charge'][0]) &
                 (example['precursor_charge'] <= kwargs['charge'][1])
             )
+
+        # Filter for length
+        if pep_length is not None:
+            dataset = dataset.filter(
+                lambda example: 
+                (len(example['tokenized_sequence']) >= pep_length[0]) &
+                (len(example['tokenized_sequence']) <= pep_length[1])
+            )
         
         # Chimeric
-        dataset = dataset.filter(lambda example: ~example['chimeric'])
+        #dataset = dataset.filter(lambda example: example['chimeric'])
 
         # Filter val set for dispersed examples
-        if 'val_steps' in kwargs.keys():
-            if kwargs['val_steps'] is not None:
-                every_n = self.val_size // batch_size // kwargs['val_steps'] - 1 # minus 1 to be safe (charge and length filter make dataset shorter)
+        if ('val_steps' in kwargs.keys()) and ('disperse' in kwargs.keys()):
+            if kwargs['disperse'] and (kwargs['val_steps'] is not None):
+                print(f"<LOADCOMMENT> Dispersing validation set into {kwargs['val_steps']} batches")
+                every_n_ = self.val_size // batch_size // kwargs['val_steps']
+                if every_n_ > 2:
+                    every_n_ -= 1 # minus 1 to be safe (charge and length filter make dataset shorter)
+                every_n = np.maximum(1, every_n_) 
                 dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
+                self.val_size = kwargs['val_steps'] * batch_size
         
         # Shuffle the dataset
         if 'buffer_size' in kwargs.keys():
@@ -325,10 +323,11 @@ class LoaderHF(LoaderObj):
         # Dataloaders #
         ###############
         num_workers = min(self.dataset['train'].n_shards, num_workers)
+        eval_collate_function = lambda x: collate_fn(x, custom_columns=custom_columns)
         self.dataloader = {
             'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn),
-            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, collate_fn),
-            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, collate_fn),
+            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, eval_collate_function),
+            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, eval_collate_function),
         }
 
 class LoaderCls(LoaderObj):

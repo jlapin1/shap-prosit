@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
-from ..utils import Scale
-import models.model_parts as mp
+from ..utils import Scale, BlockMasks
+import ..models.model_parts as mp
 import torch as th
 from torch import nn
 I = nn.init
@@ -9,7 +9,7 @@ I = nn.init
 import collections
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
-from .diffusion.gaussian_diffusion import _extract_into_tensor
+from ..models.diffusion.gaussian_diffusion import _extract_into_tensor
 
 def init_decoder_weights(module):
     if hasattr(module, 'first'):
@@ -63,6 +63,7 @@ class base_diffusion_decoder(nn.Module):
         depth=6,
         use_charge=True,
         use_mass=True,
+        use_leftover=False,
         precursor_dimension=128,
     ):
         super(base_diffusion_decoder, self).__init__()
@@ -80,6 +81,7 @@ class base_diffusion_decoder(nn.Module):
         self.scale = Scale(self.outdict)
 
         self.use_mass = use_mass
+        self.use_leftover = use_leftover
         self.use_charge = use_charge
                 
         self.precursor_dimension = precursor_dimension
@@ -98,16 +100,16 @@ class base_diffusion_decoder(nn.Module):
         ##############
         self.use_charge = use_charge
         self.use_mass = use_mass
-        self.atleast1 = True if (use_charge or use_mass) else False
+        self.atleast1 = True if (use_charge or use_mass or use_leftover) else False
         if self.atleast1:
             self.added_tokens = 1
-            num = sum([use_charge, use_mass])
+            num = sum([use_charge, use_mass, use_leftover])
             if use_charge:
                 #charge_embedder = nn.Embedding(8, embedding_dimension)
                 self.charge_features = lambda charge: (
                     mp.FourierFeatures(charge, 1, 10, precursor_dimension)
                 )
-            if use_mass:
+            if use_mass | use_leftover:
                 self.mass_features = lambda mass: (
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
@@ -164,13 +166,19 @@ class base_diffusion_decoder(nn.Module):
 
         return intseq
     
-    def AddPosEmbed(self, seq_emb):
-        return seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
+    def AddPosEmbed(self, seq_emb, doubled=False):
+        sl = seq_emb.shape[1]
+        if doubled:
+            halfway = sl // 2
+            pos = th.cat([self.pos[:halfway], self.pos[:halfway]], dim=0)
+        else:
+            pos = self.pos[:sl]
+        return seq_emb + self.pos_modulator * pos.unsqueeze(0)
 
-    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None):
+    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None, seq=None, doubled=False):
         
         # Add position to sequence
-        out = self.AddPosEmbed(seq_emb)
+        out = self.AddPosEmbed(seq_emb, doubled=doubled)
 
         # charge and/or energy embedding
         if self.atleast1:
@@ -180,6 +188,10 @@ class base_diffusion_decoder(nn.Module):
                 ce_emb.append(self.charge_features(charge))
             if self.use_mass:
                 ce_emb.append(self.mass_features(mass))
+            if self.use_leftover:
+                mass_so_far = self.scale.intseq2mz(seq, charge)
+                leftover_mass = mass - mass_so_far
+                ce_emb.append(self.mass_features(leftover_mass))
             if len(ce_emb) > 1:
                 ce_emb = th.cat(ce_emb, dim=-1)
             ce_emb = self.precursor_emb(ce_emb)
@@ -194,18 +206,28 @@ class base_diffusion_decoder(nn.Module):
     def sequence_mask(self, seq):
         return seq != self.NT
 
-    def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None):
+    def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None, sa_cache=None):
         out = inp
-        for layer in self.main:
+        caches=[]
+        for i, layer in enumerate(self.main):
+            if sa_cache is not None:
+                dic = sa_cache[i]
+                sa_cache_k = dic['k']
+                sa_cache_v = dic['v']
+            else:
+                sa_cache_k=sa_cache_v=None
             out = layer(
                 out, 
                 kv_feats=kv_feats, 
                 embed_feats=embed, 
                 spec_mask=spec_mask,
-                seq_mask=seq_mask 
+                seq_mask=seq_mask,
+                sa_cache_k=sa_cache_k,
+                sa_cache_v=sa_cache_v,
             )
+            caches.append(out['kv_cache'])
             out = out['out']
-        
+        out = {'out': out, 'kv_cache': caches}
         return out
 
 class DenovoDiffusionDecoder(base_diffusion_decoder):
@@ -301,7 +323,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         with th.no_grad(): 
             self.seq_emb.weight[self.NT] = th.zeros_like(self.seq_emb.weight[self.NT])
         # lm_head: backward
-        self.lm_head = nn.Linear(input_output_units, len(self.outdict))
+        self.lm_head = nn.Linear(input_output_units, get_max_dic_value(self.outdict))
         with th.no_grad():
             self.lm_head.weight = self.seq_emb.weight
 
@@ -344,7 +366,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         out = self.Main(
             emb, kv_feats=kv_feats, embed=time_emb, 
             spec_mask=specmask, seq_mask=None
-        )
+        )['out']
         out = self.RemovePrecursorToken(out)
         out = self.final_down_proj(out)
         out_dict = {'mean': out}
@@ -417,11 +439,13 @@ class MDLMDecoder(base_diffusion_decoder):
         alphabet=False,
         use_charge=False,
         use_mass=False,
+        use_leftover=False,
         prenorm=False,
         self_condition=True,
         output_sigma=False,
         clip_denoised=False,
         clamp_denoised=False,
+        wavelength_bounds=(1e-6, 10),
         **kwargs
     ):
         super().__init__(
@@ -439,6 +463,7 @@ class MDLMDecoder(base_diffusion_decoder):
             kv_input_dimension=decoder_config['kv_indim'],
             use_charge=use_charge,
             use_mass=use_mass,
+            use_leftover=use_leftover,
             precursor_dimension=precursor_dimension,
         )
         self.finish_dict()
@@ -448,6 +473,7 @@ class MDLMDecoder(base_diffusion_decoder):
         self.max_sl = decoder_config['sequence_length'] # + 1
 
         # Timestep embedding
+        self.wavelength_bounds = wavelength_bounds
         self.time_embed = nn.Sequential(
             nn.Linear(timestep_dimension, timestep_dimension),
             nn.SiLU(),
@@ -471,12 +497,29 @@ class MDLMDecoder(base_diffusion_decoder):
             nn.Linear(running_units, self.predcats),
         )
 
+        if 'block_size' in kwargs:
+            self.block_size = kwargs['block_size']
+        else:
+            self.block_size = None
+
     def finish_dict(self):
-        self.outdict['<SOS>'] = get_max_dic_value(self.outdict) #TODO REMOVE THIS
-        self.outdict['<MASK>'] = get_max_dic_value(self.outdict)
+        self.outdict['<SOS>'] = int(get_max_dic_value(self.outdict)) # TODO backwards compat. for checkpoints prior to Dec2025 REMOVE once you have new weights.
+        self.outdict['<MASK>'] = int(get_max_dic_value(self.outdict))
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = get_max_dic_value(self.outdict)
+        self.scale = Scale(self.outdict)
+    
+    def create_block(self, batch_size, block_size=None):
+        block_size = self.block_size if block_size==None else block_size
+        return th.full((batch_size, block_size), self.MASK, dtype=th.int64)
+
+    def add_block(self, x, block_size=None):
+        add = self.create_block(x.shape[0], block_size=block_size).to(x.device)
+        return th.cat([x, add], dim=1)
+
+    def get_inference_mask(self, sequence_length):
+        return BlockMasks('block_causal', sequence_length, self.block_size, precursor_token=True)
 
     def forward(self,
         x,
@@ -484,17 +527,20 @@ class MDLMDecoder(base_diffusion_decoder):
         kv_features,
         charge,
         mass,
+        sa_cache=None,
         specmask=None,
+        seqmask=None,
         self_conditions=None,
+        doubled=False,
     ):
         # Timestep
-        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, *self.wavelength_bounds, self.timestep_dimension))
 
         # Beginning
         seq_emb = self.embed_sequence(x)
         if self.self_condition:
             seq_emb += self.embed_self_conditions(self_conditions)
-        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x, doubled=doubled) # position added inside
         emb = self.proj_begin(emb)
         
         # Middle
@@ -503,26 +549,147 @@ class MDLMDecoder(base_diffusion_decoder):
             kv_feats=kv_features,
             embed=time_emb,
             spec_mask=specmask,
-            seq_mask=None,
+            seq_mask=seqmask,
+            sa_cache=sa_cache,
         )
+        cache = out['kv_cache']
+        out = out['out']
 
         # End
         out = self.proj_end(out)
         out = self.RemovePrecursorToken(out)
 
-        return out
+        return {'out': out, 'sa_cache': cache}
     
-    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, progress=False):
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+        bs = embedding.shape[0]
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
         }
-        out = self.diff_obj._sample(
-            save_x=save_x, 
-            save_p=save_p, 
-            top=top, 
-            progress=progress, 
-            model_kwargs=model_kwargs
-        )
-        return out
+        blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
+        
+        out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=embedding.device)
+        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=embedding.device)
+        x = th.empty((bs, 0), dtype=th.int64).to(embedding.device)
+        for m in range(blocks):
+            
+            # Add to input
+            if blocks == 1:
+                x = None
+            else:
+                block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
+                x = self.add_block(x, block_size=block_size)
+                model_kwargs['seqmask'] = self.get_inference_mask(x.shape[1])[None,None].to(x.device)
+            
+            # Predict
+            out_ = self.diff_obj._sample(
+                x=x,
+                save_x=save_x,
+                save_p=save_p,
+                top=top,
+                num_steps=num_steps,
+                progress=progress,
+                model_kwargs=model_kwargs
+            )
+            
+            # Add to output
+            if blocks == 1:
+                out = out_['prediction']
+                logits = out_['logits']
+                if save_x: x_save = out_['x_save']
+                if save_p: p_save = out_['p_save']
+            else:
+                extent = min(self.max_sl, (m+1)*self.block_size)
+                out[:, : extent] = out_['prediction'][:,:extent]
+                logits[:, m*self.block_size : extent] = out_['logits'][:, m*self.block_size : extent]
+                x = out_['prediction']
+                if save_x:
+                    if m==0:
+                        x_save = out_['x_save']
+                    else:
+                        x_save = th.cat([x_save, out_['x_save'][:,:,m*self.block_size:extent]], dim=2)
+                if save_p:
+                    if m==0:
+                        p_save = out_['p_save']
+                    else:
+                        p_save = th.cat([p_save, out_['p_save'][:,:,m*self.block_size:extent]], dim=2)
+                
+        output = {'prediction' : out, 'logits': logits,}
+        if save_x:
+            output['x_save'] = x_save
+        if save_p:
+            output['p_save'] = p_save
+        return output
+
+class D3PMDecoder(MDLMDecoder):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def finish_dict(self):
+        self.rev_outdict = {n:m for m,n in self.outdict.items()}
+        self.predcats = get_max_dic_value(self.outdict)
+        self.scale = Scale(self.outdict)
+
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+        bs = embedding.shape[0]
+        model_kwargs = {
+            'kv_features': embedding,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+        }
+        blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
+        
+        #out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=embedding.device)
+        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=embedding.device)
+        x = th.empty((bs, 0), dtype=th.int64).to(embedding.device)
+        for m in range(blocks):
+            
+            # Add to input
+            if blocks == 1:
+                x = th.randint(0, self.predcats, (bs, self.max_sl,), device=x.device)
+            else:
+                block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
+                x = self.add_block(x, block_size=block_size)
+                model_kwargs['seqmask'] = self.get_inference_mask(x.shape[1])[None,None].to(x.device)
+            
+            # Predict
+            out_ = self.diff_obj._sample(
+                x=x,
+                save_x=save_x,
+                save_p=save_p,
+                top=top,
+                num_steps=num_steps,
+                progress=progress,
+                model_kwargs=model_kwargs
+            )
+            
+            # Add to output
+            if blocks == 1:
+                out = out_['prediction']
+                logits = out_['logits']
+                if save_x: x_save = out_['x_save']
+                if save_p: p_save = out_['p_save']
+            else:
+                extent = min(self.max_sl, (m+1)*self.block_size)
+                out[:, : extent] = out_['prediction'][:,:extent]
+                logits[:, m*self.block_size : extent] = out_['logits'][:, m*self.block_size : extent]
+                x = out_['prediction']
+                if save_x:
+                    if m==0:
+                        x_save = out_['x_save']
+                    else:
+                        x_save = th.cat([x_save, out_['x_save'][:,:,m*self.block_size:extent]], dim=2)
+                if save_p:
+                    if m==0:
+                        p_save = out_['p_save']
+                    else:
+                        p_save = th.cat([p_save, out_['p_save'][:,:,m*self.block_size:extent]], dim=2)
+                
+        output = {'prediction' : out, 'logits': logits,}
+        if save_x:
+            output['x_save'] = x_save
+        if save_p:
+            output['p_save'] = p_save
+        return output
