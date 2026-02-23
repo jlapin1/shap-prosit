@@ -1,7 +1,7 @@
 import yaml
 import os
 import sys
-import .utils as U
+from . import utils as U
 import wandb
 from .models.model_runners import *
 

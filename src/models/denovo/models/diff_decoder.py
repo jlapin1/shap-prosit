@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
 from ..utils import Scale, BlockMasks
-import ..models.model_parts as mp
+from . import model_parts as mp
 import torch as th
 from torch import nn
 I = nn.init
@@ -9,7 +9,7 @@ I = nn.init
 import collections
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
-from ..models.diffusion.gaussian_diffusion import _extract_into_tensor
+from .diffusion.gaussian_diffusion import _extract_into_tensor
 
 def init_decoder_weights(module):
     if hasattr(module, 'first'):

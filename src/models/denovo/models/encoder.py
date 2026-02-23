@@ -1,7 +1,7 @@
 import sys
 sys.path.append("/cmnfs/home/j.lapin/projects/foundational")
-import ..models.model_parts as mp
-import ..models.model_parts_pw as pw
+from . import model_parts as mp
+from . import model_parts_pw as pw
 import torch as th
 from torch import nn
 I = nn.init

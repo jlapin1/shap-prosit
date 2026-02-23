@@ -2,7 +2,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 import torch as th
 import os
-import .utils
+from . import utils
 import re
 from glob import glob
 import sys
@@ -204,7 +204,8 @@ class LoaderHF(LoaderObj):
                     letter_a, letter_b = pair
                     self.amod_dic = self.synonym(letter_a, letter_b, self.amod_dic)
             self.amod_dic_rev = self.reverse_dictionary(self.amod_dic)
-        
+        self.tokenizer = self.create_tokenizer(tokenizer_path)
+        return None
         #####################
         # Dictionary masses #
         #####################

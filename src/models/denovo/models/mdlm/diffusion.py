@@ -15,9 +15,9 @@ from torch import Tensor
 
 #import dataloader
 #import models
-import ...models.mdlm.noise_schedule as noise_schedule
-import ...models.mdlm.ema as ema
-import ...models.mdlm.utils as utils
+from . import noise_schedule
+from . import ema
+from . import utils
 from tqdm.auto import tqdm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

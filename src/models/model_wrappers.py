@@ -611,6 +611,7 @@ class MDLM(ModelWrapper):
         D.model.eval()
         D.model.decoder.diff_obj.steps = diffusion_steps
         self.D = D
+        self.is_reverse = lambda listseq: listseq[::-1] if D.reverse else listseq
 
     def hx(self, twod_inputs: ndarray) -> dict:
         # mz, ab, charge, mass, length (spectrum)
@@ -631,17 +632,21 @@ class MDLM(ModelWrapper):
         }
         return batch
 
-    def predict_peptide(self, inputs: ndarray) -> List[str]:
+    def predict_peptide(self, inputs: ndarray, max_length: int=None) -> List[str]:
         # Currently only working for batch_size == 1
         batch = self.hx(inputs)
         kwargs = {'save_x': False, 'save_p': False, 'progress': False, 'n': 1, 'top': 1, 'return_full': False}
+        # Make the prediction faster by setting the maxlen to the length of the peptide
+        if max_length is not None:
+            #self.D.model.decoder.max_sl = max_length
+            self.D.model.decoder.diff_obj.SL = max_length
         predicted_intseq = self.D.model.predict_sequence(batch, **kwargs)['prediction'].squeeze()
         
         string2int = self.D.model.decoder.outdict
         int2string = self.D.model.decoder.rev_outdict
         dont_show = [string2int['X'], string2int['<EOS>'], string2int['<MASK>']]
         
-        return [int2string[int(m)] for m in predicted_intseq if m not in dont_show]
+        return self.is_reverse([int2string[int(m)] for m in predicted_intseq if m not in dont_show])
 
     def make_prediction(self, inputs: ndarray):
         batch = self.hx(inputs)

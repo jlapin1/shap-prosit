@@ -1,17 +1,17 @@
 import torch as th
 from ..loader import LoaderHF
 import numpy as np
-from ..models.diff_classifier import Classifier
+#from ..models.diff_classifier import Classifier
 import os
 import shutil
 from tqdm import tqdm
 from collections import deque
 from time import time
-import ..utils as U
+from .. import utils as U
 from copy import deepcopy
 import wandb
 from glob import glob
-import metrics as met
+from .. import metrics as met
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -845,7 +845,7 @@ class DenovoMDLMObj(BaseDenovo):
         self.training_loss_keys.extend(['loss'])
         self.eval_kwargs = {}
 
-        from models.seq2seq import Seq2SeqMDLM
+        from .seq2seq import Seq2SeqMDLM
         
         diff_config = config['decoder_mdlm']['diffusion_config']
         self.diff_config = diff_config

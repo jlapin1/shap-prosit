@@ -2,7 +2,7 @@ shap_calculator:
   # SHAP calculation settings
   shap_settings:
     val_data_path: "/cmnfs/proj/shap-prosit/data/MSV000094383.parquet" # read
-    output_dir: caulipera # write
+    output_dir: test # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
     bgd_sz: 100 # setting
@@ -20,7 +20,7 @@ shap_calculator:
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/diffusion/experiments/2025-11-04_06-47-44" # read
+      model_path: "/cmnfs/proj/diffusion/experiments/2026-02-04_07-58-15" # read
       diffusion_steps: 1
   
 shap_visualization:

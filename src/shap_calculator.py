@@ -202,10 +202,11 @@ class ShapCalculator:
         
         # Get model's predicted peptide 
         # - Reminder: diffusion models are non-deterministic
-        predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig)
+        max_length = len(kwargs['peptide'])+1 if 'peptide' in kwargs else None
+        predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig, max_length=max_length)
         #print(f"Predicted peptide: {''.join(predicted_aa_list)}")
         if 'peptide' in kwargs:
-            correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', kwargs['peptide'])
+            correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', "".join(kwargs['peptide']))
             if not correct:
                 return False
 
@@ -302,6 +303,7 @@ def save_shap_values(
     """
     val = val_data['full']
     peptides = val_data['modified_sequence'].to_list()
+    tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.D.data.tokenizer(x)).to_list()
     bgd = np.zeros((1, max_peaks))
 
     # NOTE: sequence length can be different than peptide length
@@ -332,7 +334,7 @@ def save_shap_values(
         Samp = base_samp
 
         # Calculate shapley values
-        out_dict = sc.calc_shap_values(sequence, samp=Samp, peptide=peptides[INDEX])
+        out_dict = sc.calc_shap_values(sequence, samp=Samp, peptide=tokenized[INDEX])
         if out_dict == False:
             continue
         # add to out_dict to include in output
