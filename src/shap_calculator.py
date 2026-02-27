@@ -223,6 +223,8 @@ class ShapCalculator:
         # Calculate the SHAP values
         shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
         shap_values = np.array(shap_values[0])
+        shap_values_ = np.zeros(shape=(shap_values.shape[0] ,len(self.mode)))
+        shap_values_[:shap_values.shape[0], :shap_values.shape[1]] = shap_values
 
         return {
             "mz": input_orig[0, 0, :-self.inputs_ignored].astype(np.float32),
@@ -230,7 +232,7 @@ class ShapCalculator:
             "charge": int(input_orig[0, 0, -2]),
             "mass": float(input_orig[0, 0, -1]),
             "pred_aaseq": predicted_aa_list,
-            "shap_values": pd.DataFrame(shap_values, columns=self.mode),
+            "shap_values": pd.DataFrame(shap_values_, columns=self.mode),
         }
 
 def save_shap_values(
