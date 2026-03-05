@@ -6,7 +6,7 @@ import sys
 sys.path.append("/cmnfs/home/j.lapin/projects/shabaz/data")
 from mass_scale import Scale, tiebreak
 scale = Scale()
-IMMONIUM_IONS = [key for key in scale.mass.keys() if (key[0]=='I')&(len(key)>1)]
+IMMONIUM_IONS = [key for key in scale.mass.keys() if (key[0]=='I')&(len(key)==3)] + ['ICCAM']
 
 amino_acid_list = list("AVILMFYWSTNQCUGPRHKDEU")
 def contains_amino_acid(token):
