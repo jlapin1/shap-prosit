@@ -1,7 +1,7 @@
 import torch as th
 from ..loader import LoaderHF
 import numpy as np
-#from ..models.diff_classifier import Classifier
+from .diff_classifier import Classifier
 import os
 import shutil
 from tqdm import tqdm
@@ -81,6 +81,11 @@ class BaseDenovo:
             batch_size=config['batch_size'],
             **self.config['loader']
         )
+
+        # I don't know the number of fragmentation methods until its file is read by LoaderHF
+        if self.config['encoder_dict']['use_method']:
+            self.config['encoder_dict']['num_methods'] = len(self.data.method_dic)
+            self.config['encoder_dict'].pop('use_method') # encoder will set this based on num_methods
         
         self.training_loss_keys = []
         self.eval_stats = []
@@ -603,7 +608,7 @@ class DenovoArDSObj(BaseDenovo):
         self.training_loss_keys = ['loss']
         self.eval_kwargs = {}
         
-        from models.seq2seq import Seq2SeqAR
+        from .seq2seq import Seq2SeqAR
         
         self.model = Seq2SeqAR(
             encoder_config = config['encoder_dict'],
@@ -697,7 +702,7 @@ class DenovoDiffusionObj(BaseDenovo):
         config['decoder_diff']['model_config']['sequence_length'] = self.config['pep_length'][1] + 1
         self.diff_config = config['decoder_diff']['diffusion_config']
 
-        from models.seq2seq import Seq2SeqDiff
+        from .seq2seq import Seq2SeqDiff
 
         # diffusion object created inside Seq2Seq
         self.model = Seq2SeqDiff(
@@ -854,6 +859,9 @@ class DenovoMDLMObj(BaseDenovo):
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
+        if self.config['decoder_diff']['model_config']['use_enzyme']:
+            self.config['decoder_diff']['model_config']['num_enzymes'] = len(self.data.enzyme_dic)
+            self.config['decoder_diff']['model_config'].pop('use_enzyme')
         
         # The diffusion models share the model_config, but with a la carte alterations
         config['decoder_diff']['model_config']['self_condition'] = diff_config['model']['self_condition']
@@ -931,6 +939,7 @@ class DenovoMDLMObj(BaseDenovo):
         model_kwargs = {
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
+            'enzyme': batch['enzyme'] if 'enzyme' in batch else None,
             'kv_features': embedding['emb'],
             'seqmask': training_mask,
             'doubled': True if block_decoding else False,
@@ -984,7 +993,7 @@ class DenovoD3PMObj(BaseDenovo):
         self.training_loss_keys.extend(['loss'])
         self.eval_kwargs = {}
 
-        from models.seq2seq import Seq2SeqD3PM
+        from .seq2seq import Seq2SeqD3PM
         
         diff_config = config['decoder_d3pm']
         self.diff_config = diff_config

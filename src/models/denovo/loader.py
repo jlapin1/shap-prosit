@@ -10,7 +10,16 @@ import pandas as pd
 import numpy as np
 join = os.path.join
 
-def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
+def map_fn(
+    example,
+    tokenizer=None,
+    dic=None,
+    method_dic=None,
+    enzyme_dic=None,
+    top=100,
+    max_seq=50,
+    reverse=False,
+):
     ab = example['intensity_array']
     ab_sort = (-ab).argsort()[:top]
     ab = ab[ab_sort]
@@ -28,6 +37,11 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
     example['precursor_charge'] = example['precursor_charge']
     example['precursor_mass'] = example['precursor_mass']
     example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+    if 'fragmentation_method' in example:
+        example['method'] = method_dic[example['fragmentation_method']]
+    if 'enzyme' in example:
+        example['enzyme_name'] = example['enzyme']
+        example['enzyme'] = enzyme_dic[example['enzyme']]
     if 'modified_sequence' in example:
         tokenized_sequence = tokenizer(example['modified_sequence'])
         peptide_length = len(tokenized_sequence)
@@ -48,6 +62,12 @@ def collate_fn(batch_list, custom_columns=[]):
     out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
     out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
     out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
+    if 'method' in batch_list[0]:
+        out['fragmentation_method'] = np.array([m['fragmentation_method'] for m in batch_list])
+        out['method'] = th.tensor([m['method'].item() for m in batch_list], dtype=th.int32)
+    if 'enzyme' in batch_list[0]:
+        out['enzyme_name'] = np.array([m['enzyme_name'] for m in batch_list])
+        out['enzyme'] = th.tensor([m['enzyme'].item() for m in batch_list], dtype=th.int32)
     if 'tokenized_sequence' in batch_list[0].keys():
         out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
         out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
@@ -170,6 +190,8 @@ class LoaderHF(LoaderObj):
         val_dataset_path: str=None,
         val_name: str=None,
         dictionary_path: str=None,
+        method_list_path: str=None,
+        enzyme_list_path: str=None,
         synonyms: list=None,
         masses_path: str=None,
         tokenizer_path: str=None,
@@ -194,9 +216,10 @@ class LoaderHF(LoaderObj):
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
         max_seq = pep_length[1] if pep_length is not None else None
         
-        ##############
-        # Dictionary #
-        ##############
+        ################
+        # Dictionaries #
+        ################
+        self.amod_dic=None
         if dictionary_path is not None:
             self.amod_dic = self.create_sequence_dictionary(dictionary_path)
             if synonyms is not None:
@@ -204,15 +227,25 @@ class LoaderHF(LoaderObj):
                     letter_a, letter_b = pair
                     self.amod_dic = self.synonym(letter_a, letter_b, self.amod_dic)
             self.amod_dic_rev = self.reverse_dictionary(self.amod_dic)
+        self.method_dic=None
+        if method_list_path is not None:
+            self.method_dic = {line.split("\t")[0]:I for I, line in enumerate(open(method_list_path).read().strip().split("\n"))}
+            self.method_dic_rev = self.reverse_dictionary(self.method_dic)
+        self.enzyme_dic=None
+        if enzyme_list_path is not None:
+            self.enzyme_dic = {line.split("\t")[0]:I for I, line in enumerate(open(enzyme_list_path).read().strip().split("\n"))}
+            self.enzyme_dic_rev = self.reverse_dictionary(self.enzyme_dic)
+        
         self.tokenizer = self.create_tokenizer(tokenizer_path)
-        return None
+        
+        """
         #####################
         # Dictionary masses #
         #####################
         # - RULES
         #   1. There is a file that matches the regex *masses.tsv in the masses_path
         self.massdic = self.load_token_masses(masses_path)
-
+        
         ###############
         # Split sizes #
         ###############
@@ -243,6 +276,8 @@ class LoaderHF(LoaderObj):
             example,
             tokenizer=self.tokenizer,
             dic=self.amod_dic,
+            method_dic=self.method_dic,
+            enzyme_dic=self.enzyme_dic,
             top=top_pks, 
             max_seq=max_seq,
             reverse=reverse,
@@ -330,7 +365,7 @@ class LoaderHF(LoaderObj):
             'val':   self.build_dataloader(dataset['val']  , batch_size, 0, eval_collate_function),
             'test':  self.build_dataloader(dataset['test'] , batch_size, 0, eval_collate_function),
         }
-
+        """
 class LoaderCls(LoaderObj):
     def __init__(
         self,

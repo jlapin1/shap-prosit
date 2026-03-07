@@ -1,12 +1,12 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/proj/shap-prosit/data/MSV000094383.parquet" # read
-    output_dir: test # write
+    val_data_path: "/cmnfs/proj/shap-prosit/data/denovo/multifrag_val.parquet" # read
+    output_dir: mf # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
     bgd_sz: 100 # setting
-    inputs_ignored: 2 # read/setting: Trailing attributes to ignore for explanations in input vector
+    inputs_ignored: 4 # read/setting: Trailing attributes to ignore for explanations in input vector
     dataset_queries: # setting
       - "method == 'HCD'"
     bgd_queries: # setting
@@ -20,7 +20,7 @@ shap_calculator:
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/diffusion/experiments/2026-02-04_07-58-15" # read
+      model_path: "/cmnfs/proj/diffusion/experiments/2026-02-26_14-13-22" # read
       diffusion_steps: 1
   
 shap_visualization:

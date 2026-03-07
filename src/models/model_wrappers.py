@@ -612,24 +612,31 @@ class MDLM(ModelWrapper):
         D.model.decoder.diff_obj.steps = diffusion_steps
         self.D = D
         self.is_reverse = lambda listseq: listseq[::-1] if D.reverse else listseq
+        self.use_mass = D.model.decoder.use_mass
+        self.use_charge = D.model.decoder.use_charge
+        self.use_enzyme = D.model.decoder.use_enzyme
+        self.use_method = D.model.encoder.use_method
 
     def hx(self, twod_inputs: ndarray) -> dict:
         # mz, ab, charge, mass, length (spectrum)
-        spectrum = twod_inputs[..., :-self.ignored_inputs]
+        spectrum = twod_inputs[..., :-self.ignored_inputs].astype(float)
         mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
         ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
         ab /= ab.max()
-        other = twod_inputs[:, 0, -self.ignored_inputs:]
-        charge = th.tensor(other[:, 0], dtype=th.int32, device=device)
-        mass = th.tensor(other[:, 1], dtype=th.float32, device=device)
         length = (mz != self.blank_token).sum(1)
-        batch = {
-            'mz': mz,
-            'ab': ab,
-            'charge': charge,
-            'mass': mass,
-            'length': length,
-        }
+        batch = {'mz': mz, 'ab': ab, 'length': length}
+        other = twod_inputs[:, 0, -self.ignored_inputs:]
+        if self.use_charge:
+            batch['charge'] = th.tensor(other[:, 0].astype(int), dtype=th.int32, device=device)
+        if self.use_mass:
+            batch['mass'] = th.tensor(other[:, 1].astype(float), dtype=th.float32, device=device)
+        if self.use_method:
+            method_int = [self.D.data.method_dic[str(m)] for m in other[:,2]]
+            batch['method'] = th.tensor(method_int, dtype=th.int32, device=device)
+        if self.use_enzyme:
+            enzyme_int = [self.D.data.enzyme_dic[str(m)] for m in other[:,3]]
+            batch['enzyme'] = th.tensor(enzyme_int, dtype=th.int32, device=device)
+
         return batch
 
     def predict_peptide(self, inputs: ndarray, max_length: int=None) -> List[str]:
@@ -641,7 +648,7 @@ class MDLM(ModelWrapper):
             #self.D.model.decoder.max_sl = max_length
             self.D.model.decoder.diff_obj.SL = max_length
         predicted_intseq = self.D.model.predict_sequence(batch, **kwargs)['prediction'].squeeze()
-        
+
         string2int = self.D.model.decoder.outdict
         int2string = self.D.model.decoder.rev_outdict
         dont_show = [string2int['X'], string2int['<EOS>'], string2int['<MASK>']]
@@ -658,6 +665,8 @@ class MDLM(ModelWrapper):
         )[...,0].gather(
             1, reveal_steps[:, None]
         )[:,0]
+        if self.D.reverse:
+            predicted_logit = th.flip(predicted_logit, dims=(-1,))
         return predicted_logit
 
 model_wrappers = {

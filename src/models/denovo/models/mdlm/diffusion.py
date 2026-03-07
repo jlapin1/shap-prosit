@@ -15,9 +15,9 @@ from torch import Tensor
 
 #import dataloader
 #import models
-from . import noise_schedule
-from . import ema
-from . import utils
+from . import noise_schedule as noise_schedule
+from . import ema as ema
+from . import utils as utils
 from tqdm.auto import tqdm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -699,12 +699,11 @@ class Diffusion:
               )
               if self.config['model']['self_condition']:
                   model_kwargs['self_conditions'] = logits
-           
-          if save_p: 
-              psave[i] = p_x0_cache
-          if (not torch.allclose(x_next, x) or self.time_conditioning):
-              # Disable caching
-              p_x0_cache = None
+              if save_p: 
+                  psave[i] = p_x0_cache
+              if True:#(not torch.allclose(x_next, x) or self.time_conditioning):
+                  # Disable caching
+                  p_x0_cache = None
               x = x_next
           else:
               x = self._analytic_update(x, t, dt)

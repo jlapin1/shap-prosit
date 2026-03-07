@@ -87,7 +87,9 @@ def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, threshold=10, 
     return found_ions, found_mzs, TP[1]
 
 def sort_array(array, axis_index, descending=False, sub_values=None, first=None):
+    original_dtype = type(array.flatten()[0])
     ndim = len(array.shape)
+    array = array.astype(float)
 
     # Put sub value in
     if sub_values is not None:
@@ -108,10 +110,10 @@ def sort_array(array, axis_index, descending=False, sub_values=None, first=None)
         argsort = argsort[:first]
     
     if ndim==1:
-        return array[argsort]
+        return array[argsort].astype(original_dtype)
     elif ndim==2:
-        return array[:, argsort]
+        return array[:, argsort].astype(original_dtype)
     elif ndim==3:
-        return np.take_along_axis(array, argsort[:,None], -1)
+        return np.take_along_axis(array, argsort[:,None], -1).astype(original_dtype)
     elif ndim=='last':
-        return array[...,argsort]
+        return array[...,argsort].astype(original_dtype)

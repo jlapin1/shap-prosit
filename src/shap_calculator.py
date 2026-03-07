@@ -48,7 +48,9 @@ class ShapCalculator:
             self.process_peptide_sequences(peptides)
 
     def process_spectra(self):
-        entire_dataset = np.zeros(( len(self.val), 2, self.max_len + self.inputs_ignored ))
+        dtype = '<U30' if type(self.val.iloc[0][0])==str else type(self.val.iloc[0][0])
+        self.dtype = dtype if dtype=='<U30' else np.float32
+        entire_dataset = np.zeros(( len(self.val), 2, self.max_len + self.inputs_ignored ), dtype=dtype)
         pbar = tqdm(self.val.items(), total=len(self.val))
         for iloc, (loc, linear_input) in enumerate(pbar):
             pbar.set_description("Processing dataset into numpy tensors")
@@ -61,11 +63,15 @@ class ShapCalculator:
             
             # Place sorted spectrum inside new variable
             actual_length = spectrum.shape[1]
-            tensor = np.zeros((2, self.max_len + self.inputs_ignored))
+            tensor = np.zeros((2, self.max_len + self.inputs_ignored), dtype=dtype)
             tensor[:, :actual_length] = spectrum
             tensor[0, -self.inputs_ignored:] = other
 
             entire_dataset[iloc] = tensor
+        
+        if dtype == '<U30':
+            entire_dataset[entire_dataset==''] = '0'
+            self.blank_token = '0'
         
         self.val = entire_dataset
 
@@ -103,7 +109,7 @@ class ShapCalculator:
         character, which was an issue for modified amino acid strings.
         """
         #out = np.tile(np.array(2, SL*[self.blank_token], dtype=np.float32)[None], [BS,1])
-        out = np.tile(np.array(SL*[self.blank_token], dtype=np.float32)[None, None], [BS,2,1])
+        out = np.tile(np.array(SL*[self.blank_token], dtype=self.dtype)[None, None], [BS,2,1])
         zsexp = np.tile(zs[:,None], [1,2,1])
         if mask:
             
@@ -181,9 +187,7 @@ class ShapCalculator:
         shape = spectrum.shape
         x_ = self.ens_pred(spectrum, self.batch_size, mask=mask)
         score = x_
-        #if shape[0] == 1:
-        #    score = np.array([score])[None, :]
-
+        
         return score
 
     def calc_shap_values(self, sequence, samp=1000, **kwargs):
@@ -209,7 +213,7 @@ class ShapCalculator:
             correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', "".join(kwargs['peptide']))
             if not correct:
                 return False
-
+        
         # Mask vector is peptide length all off
         # - By turning the ignored inputs on, I am ignoring there contribution
         maskvec = np.zeros((self.bgd_size, shap_vector_length))
@@ -222,15 +226,17 @@ class ShapCalculator:
 
         # Calculate the SHAP values
         shap_values = ex.shap_values(inpvec, nsamples=samp, silent=True)
-        shap_values = np.array(shap_values[0])
+        shap_values = np.array(shap_values[0, :-num_ignored])
         shap_values_ = np.zeros(shape=(shap_values.shape[0] ,len(self.mode)))
         shap_values_[:shap_values.shape[0], :shap_values.shape[1]] = shap_values
 
         return {
-            "mz": input_orig[0, 0, :-self.inputs_ignored].astype(np.float32),
-            "intensity": input_orig[0, 1, :-self.inputs_ignored].astype(np.float32),
-            "charge": int(input_orig[0, 0, -2]),
-            "mass": float(input_orig[0, 0, -1]),
+            "mz": input_orig[0, 0, :-num_ignored].astype(np.float32),
+            "intensity": input_orig[0, 1, :-num_ignored].astype(np.float32),
+            "charge": int(input_orig[0, 0, -4]),
+            "mass": float(input_orig[0, 0, -3]),
+            "fragmentation_method": input_orig[0, 0, -2],
+            "enzyme": input_orig[0, 0, -1],
             "pred_aaseq": predicted_aa_list,
             "shap_values": pd.DataFrame(shap_values_, columns=self.mode),
         }
@@ -346,7 +352,7 @@ def save_shap_values(
         shap_values = out_dict.pop("shap_values")
         for column in shap_values:
             ind_col_name = f"sv_indices_{column}"
-            mode_indices = np.where(shap_values[column] != sc.blank_token)[0].astype(np.int16)
+            mode_indices = np.where(shap_values[column] != 0)[0].astype(np.int16)
             shap_results[ind_col_name] = mode_indices
             sv_col_name = f"sv_values_{column}"
             mode_shap_values = shap_values[column].iloc[mode_indices].to_numpy().astype(np.float32)
@@ -396,6 +402,7 @@ if __name__ == "__main__":
     # Model
     model_type = 'koina' if 'koina' in config['model_settings']['model_type'] else 'local'
     model_wrapper = model_wrappers[config['model_settings']["model_type"]](
+        ignored_inputs=config['shap_settings']['inputs_ignored'],
         **config['model_settings'][model_type],
     )
     

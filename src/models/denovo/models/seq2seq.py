@@ -128,6 +128,9 @@ class Seq2Seq(nn.Module):
             'mass': (
                 batch['mass'] if self.encoder.use_mass else None
             ),
+            'method': (
+                batch['method'] if self.encoder.use_method else None
+            ),
             'length': batch['length'] if mask_length else None,
             'return_mask': return_mask,
         }
@@ -295,7 +298,7 @@ class Seq2SeqMDLM(Seq2Seq):
         )
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
-        decoder_config['embed_type'] = 'preembed' if diff_config['time_conditioning'] else None # COMMENT OUT for backward compatibility <2025-02-24
+        decoder_config['embed_type'] = 'preembed' if diff_config['time_conditioning'] else None
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,

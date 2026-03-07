@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
-from utils import Scale
-import models.model_parts as mp
+from ..utils import Scale
+from . import model_parts as mp
 import torch as th
 from torch import nn
 I = nn.init

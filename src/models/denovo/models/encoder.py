@@ -54,8 +54,9 @@ class Encoder(nn.Module):
                  subdivide=False, # subdivide mz units in 2s and expand-concat
                  use_charge=False, # inject charge into TransBlocks
                  use_energy=False, # inject energy into TransBlocks
-                 use_mass=False, # injuect mass into TransBlocks
-                 ce_units=256, # units for transformation of mzab fourier vectors
+                 use_mass=False, # inject mass into TransBlocks
+                 num_methods=0, # condition on fragmentation method
+                 cond_units=256, # units for transformation of mzab fourier vectors
                  att_d=64, # attention qkv dimension units
                  att_h=4,  # attention qkv heads
                  gate=False, # input dependent gate following weights*V
@@ -63,7 +64,7 @@ class Encoder(nn.Module):
                  ffn_multiplier=4, # multiply inp units for 1st FFN transform
                  prenorm=True, # normalization before attention/ffn layers
                  norm_type='layer', # normalization type
-                 prec_type=None, # inject_pre | inject_ffn | inject_norm | None
+                 cond_type=None, # inject_pre | inject_ffn | inject_norm | None
                  depth=9, # number of transblocks
                  # Pairwise options
                  bias=False, # use pairwise mz tensor to create SA-bias
@@ -76,7 +77,8 @@ class Encoder(nn.Module):
                  pw_n=4, # pair transition unit multiplier
                  # Miscellaneous
                  recycling_its=1, # recycling iterations
-                 device=th.device('cpu')
+                 device=th.device('cpu'),
+                 **kwargs # capture (and kill) arguments from yaml that are not used inside here
                  ):
         super(Encoder, self).__init__()
         self.run_units = running_units
@@ -87,7 +89,9 @@ class Encoder(nn.Module):
         self.use_charge = use_charge
         self.use_energy = use_energy
         self.use_mass = use_mass
-        self.ce_units = ce_units
+        self.use_method = True if num_methods>0 else False
+        self.num_methods = num_methods
+        self.cond_units = cond_units
         self.d = att_d
         self.h = att_h
         self.bias = bias
@@ -96,7 +100,9 @@ class Encoder(nn.Module):
         self.depth = depth
         self.prenorm = prenorm
         self.norm_type = norm_type
-        self.prec_type = prec_type
+        self.cond_type = cond_type
+        if cond_type == "prepend":
+            self.cond_units = running_units
         self.its = recycling_its
         self.device = device
         
@@ -131,20 +137,27 @@ class Encoder(nn.Module):
             ])
 
         # charge/energy/mass embedding transformation
-        self.atleast1 = use_charge or use_energy or use_mass
+        self.atleast1 = use_charge or use_energy or use_mass or self.use_method
         if self.atleast1:
-            if prec_type == 'inject_pre':
-                prec_type = 'preembed'
-            elif prec_type == 'inject_ffn':
-                prec_type = 'ffnembed'
-            elif prec_type == 'inject_norm':
-                prec_type = 'normembed'
+            if cond_type == 'inject_pre':
+                cond_type_transblock = 'preembed'
+            elif cond_type == 'inject_ffn':
+                cond_type_transblock = 'ffnembed'
+            elif cond_type == 'inject_norm':
+                cond_type_transblock = 'normembed'
+            elif cond_type == 'prepend':
+                cond_type_transblock = None
             else:
-                raise NotImplementedError("Choose real prec_type")
-            num = sum([use_charge, use_energy, use_mass])
-            self.ce_emb = nn.Sequential(
-                nn.Linear(ce_units*num, ce_units), nn.SiLU()
+                raise NotImplementedError("Choose real cond_type")
+            num = sum([use_charge, use_energy, use_mass, self.use_method])
+            if self.use_method:
+                self.method_embedder = nn.Embedding(num_methods, cond_units)
+            self.cond_emb = nn.Sequential(
+                nn.Linear(cond_units*num, self.cond_units),
+                nn.SiLU(),
             )
+        else:
+            cond_type_transblock = None
         
         # First transformation
         self.first = nn.Linear(mz_units+ab_units, running_units, bias=False)
@@ -169,17 +182,17 @@ class Encoder(nn.Module):
             'dropout': dropout,
             'alphabet': alphabet,
         }
-        if not self.atleast1 and prec_type is not None: 
-            prec_type = None
-            print("<ENCCOMMENT> No precursors info used in model. Setting prec_type to None")
+        if not self.atleast1 and cond_type is not None: 
+            cond_type = None
+            print("<ENCCOMMENT> No conditioning info used in model. Setting cond_type to None")
         self.main = nn.ModuleList([
             mp.TransBlock(
                 attention_dict, 
                 ffn_dict, 
                 norm_type=norm_type, 
                 prenorm=prenorm, 
-                embed_type=prec_type, 
-                embed_indim=ce_units,
+                embed_type=cond_type_transblock, 
+                embed_indim=cond_units,
             ) 
             for _ in range(depth)
         ])
@@ -263,12 +276,27 @@ class Encoder(nn.Module):
             other.append(out['other'])
             out = out['out']
         return {'out': self.main_proj(out), 'other': other}
+
+    def create_mask_from_lengths(self, length, max_length):
+        if length != None:
+            grid = th.tile(
+                th.arange(max_length, dtype=th.int32)[None].to(length.device), 
+                (length.shape[0], 1)
+            ) # bs, seq_len
+            mask = grid >= length[:, None]
+            mask = (1e7*mask).type(th.float32)
+            if self.atleast1 and (self.cond_type == 'prepend'):
+                mask = th.cat([th.zeros(mask.shape[0], 1, device=mask.device), mask], dim=1)
+        else:
+            mask = None
+        return mask
     
     def UpdateEmbed(self, 
                     x, 
                     charge=None, 
                     energy=None, 
                     mass=None,
+                    method=None,
                     length=None, 
                     emb=None,
                     inp_mask=None,
@@ -276,32 +304,27 @@ class Encoder(nn.Module):
                     return_mask=False,
                     return_full=False,
                     ):
+        
         # Create mask
-        if length != None:
-            grid = th.tile(
-                th.arange(x.shape[1], dtype=th.int32)[None].to(x.device), 
-                (x.shape[0], 1)
-            ) # bs, seq_len
-            mask = grid >= length[:, None]
-            mask = (1e7*mask).type(th.float32)
-        else:
-            mask = None
+        mask = self.create_mask_from_lengths(length, x.shape[1])
         
         # Spectrum level embeddings
         if self.atleast1:
-            ce_emb = []
+            cond_emb = []
             if self.use_charge:
                 charge = charge.type(th.float32)
-                ce_emb.append(mp.FourierFeatures(charge, 1, 50, self.ce_units))
+                cond_emb.append(mp.FourierFeatures(charge, 1, 50, self.cond_units))
             if self.use_energy:
-                ce_emb.append(mp.FourierFeatures(energy, self.ce_units, 150.))
+                cond_emb.append(mp.FourierFeatures(energy, self.cond_units, 150.))
             if self.use_mass:
-                ce_emb.append(mp.FourierFeatures(mass, 0.001, 10000, self.ce_units))
+                cond_emb.append(mp.FourierFeatures(mass, 0.001, 10000, self.cond_units))
+            if self.use_method:
+                cond_emb.append(self.method_embedder(method))
             # tf.concat works if list is 1 or multiple members
-            ce_emb = th.cat(ce_emb, dim=-1)
-            ce_emb = self.ce_emb(ce_emb)
+            cond_emb = th.cat(cond_emb, dim=-1)
+            cond_emb = self.cond_emb(cond_emb)
         else:
-            ce_emb = None
+            cond_emb = None
         
         # Feed forward
         mzab_dic = self.MzAb(x, inp_mask)
@@ -312,13 +335,18 @@ class Encoder(nn.Module):
             pwemb = self.PwSeq(pwemb)
         
         out = self.first(mabemb)
+        if self.atleast1 and (self.cond_type == 'prepend'):
+            out = th.cat([cond_emb[:,None], out], dim=1)
+            cond_emb = None
         
         # Reycling the embedding with normalization, perhaps dense transform
         if self.its > 1:
             out = self.alpha*out + self.alphacyc*self.recyc(emb)
         
-        main = self.Main(out, embed=ce_emb, mask=mask, pwtsr=pwemb, return_full=return_full) # AlphaFold has +=
-        
+        main = self.Main(out, embed=cond_emb, mask=mask, pwtsr=pwemb, return_full=return_full) # AlphaFold has +=
+        if self.atleast1 and (self.cond_type == 'prepend'):
+            out = out[:,1:]
+
         emb = (
             self.main_alpha*emb + self.main_beta*main['out']
             if self.its > 1 else main['out']
@@ -342,6 +370,7 @@ class Encoder(nn.Module):
              charge=None, 
              energy=None, 
              mass=None,
+             method=None,
              length=None, 
              emb=None, 
              inp_mask=None,
@@ -368,7 +397,8 @@ class Encoder(nn.Module):
                 x, 
                 charge=charge, 
                 energy=energy, 
-                mass=mass, 
+                mass=mass,
+                method=method,
                 length=length, 
                 emb=emb, 
                 inp_mask=inp_mask, 

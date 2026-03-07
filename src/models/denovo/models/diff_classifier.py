@@ -1,8 +1,8 @@
 import torch as th
 from torch import nn
-import models.model_parts as mp
-from models.diffusion.gaussian_diffusion import _extract_into_tensor
-from models.diffusion.model_utils import create_diffusion
+from . import model_parts as mp
+from .diffusion.gaussian_diffusion import _extract_into_tensor
+from .diffusion.model_utils import create_diffusion
 import os
 from glob import glob
 import yaml

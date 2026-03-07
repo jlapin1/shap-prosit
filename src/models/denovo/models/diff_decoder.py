@@ -64,6 +64,7 @@ class base_diffusion_decoder(nn.Module):
         use_charge=True,
         use_mass=True,
         use_leftover=False,
+        num_enzymes=0,
         precursor_dimension=128,
     ):
         super(base_diffusion_decoder, self).__init__()
@@ -83,6 +84,7 @@ class base_diffusion_decoder(nn.Module):
         self.use_mass = use_mass
         self.use_leftover = use_leftover
         self.use_charge = use_charge
+        self.use_enzyme = True if num_enzymes > 0 else False
                 
         self.precursor_dimension = precursor_dimension
         
@@ -100,10 +102,10 @@ class base_diffusion_decoder(nn.Module):
         ##############
         self.use_charge = use_charge
         self.use_mass = use_mass
-        self.atleast1 = True if (use_charge or use_mass or use_leftover) else False
+        self.atleast1 = True if (use_charge or use_mass or use_leftover or self.use_enzyme) else False
         if self.atleast1:
             self.added_tokens = 1
-            num = sum([use_charge, use_mass, use_leftover])
+            num = sum([use_charge, use_mass, use_leftover, self.use_enzyme])
             if use_charge:
                 #charge_embedder = nn.Embedding(8, embedding_dimension)
                 self.charge_features = lambda charge: (
@@ -113,6 +115,8 @@ class base_diffusion_decoder(nn.Module):
                 self.mass_features = lambda mass: (
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
+            if self.use_enzyme:
+                self.enzyme_features = nn.Embedding(num_enzymes, precursor_dimension)
             self.precursor_emb = nn.Sequential(
                 nn.Linear(precursor_dimension*num, running_units)
             )
@@ -175,7 +179,16 @@ class base_diffusion_decoder(nn.Module):
             pos = self.pos[:sl]
         return seq_emb + self.pos_modulator * pos.unsqueeze(0)
 
-    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None, seq=None, doubled=False):
+    def AddPrecursorToken(
+        self,
+        seq_emb,
+        charge=None,
+        energy=None,
+        mass=None,
+        seq=None,
+        enzyme=None,
+        doubled=False,
+    ):
         
         # Add position to sequence
         out = self.AddPosEmbed(seq_emb, doubled=doubled)
@@ -192,6 +205,8 @@ class base_diffusion_decoder(nn.Module):
                 mass_so_far = self.scale.intseq2mz(seq, charge)
                 leftover_mass = mass - mass_so_far
                 ce_emb.append(self.mass_features(leftover_mass))
+            if self.use_enzyme:
+                ce_emb.append(self.enzyme_features(enzyme))
             if len(ce_emb) > 1:
                 ce_emb = th.cat(ce_emb, dim=-1)
             ce_emb = self.precursor_emb(ce_emb)
@@ -440,6 +455,7 @@ class MDLMDecoder(base_diffusion_decoder):
         use_charge=False,
         use_mass=False,
         use_leftover=False,
+        num_enzymes=0,
         prenorm=False,
         embed_type=None,
         self_condition=True,
@@ -465,6 +481,7 @@ class MDLMDecoder(base_diffusion_decoder):
             use_charge=use_charge,
             use_mass=use_mass,
             use_leftover=use_leftover,
+            num_enzymes=num_enzymes,
             precursor_dimension=precursor_dimension,
         )
         self.finish_dict()
@@ -479,7 +496,7 @@ class MDLMDecoder(base_diffusion_decoder):
             nn.Linear(timestep_dimension, timestep_dimension),
             nn.SiLU(),
             nn.Linear(timestep_dimension, timestep_dimension),
-        )
+        ) if embed_type is not None else nn.Identity()
         
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
@@ -528,6 +545,7 @@ class MDLMDecoder(base_diffusion_decoder):
         kv_features,
         charge,
         mass,
+        enzyme=None,
         sa_cache=None,
         specmask=None,
         seqmask=None,
@@ -541,7 +559,7 @@ class MDLMDecoder(base_diffusion_decoder):
         seq_emb = self.embed_sequence(x)
         if self.self_condition:
             seq_emb += self.embed_self_conditions(self_conditions)
-        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x, doubled=doubled) # position added inside
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x, enzyme=enzyme, doubled=doubled) # position added inside
         emb = self.proj_begin(emb)
         
         # Middle
@@ -568,6 +586,7 @@ class MDLMDecoder(base_diffusion_decoder):
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
+            'enzyme': batch['enzyme'] if 'enzyme' in batch else None,
         }
         blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
         
