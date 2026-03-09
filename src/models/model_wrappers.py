@@ -615,13 +615,17 @@ class MDLM(ModelWrapper):
 
     def hx(self, twod_inputs: ndarray) -> dict:
         # mz, ab, charge, mass, length (spectrum)
-        spectrum = twod_inputs[..., :-self.ignored_inputs]
+        spectrum = twod_inputs[..., :-self.ignored_inputs].astype(float)
         mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
         ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
         ab /= ab.max()
         other = twod_inputs[:, 0, -self.ignored_inputs:]
-        charge = th.tensor(other[:, 0], dtype=th.int32, device=device)
-        mass = th.tensor(other[:, 1], dtype=th.float32, device=device)
+        if self.D.model.decoder.use_charge:
+            # Assume first other is charge
+            charge = th.tensor(other[:, 0].astype(float), dtype=th.int32, device=device)
+        if self.D.model.decoder.use_mass:
+            # Assume second other is mass
+            mass = th.tensor(other[:, 1].astype(float), dtype=th.float32, device=device)
         length = (mz != self.blank_token).sum(1)
         batch = {
             'mz': mz,
@@ -646,18 +650,22 @@ class MDLM(ModelWrapper):
         int2string = self.D.model.decoder.rev_outdict
         dont_show = [string2int['X'], string2int['<EOS>'], string2int['<MASK>']]
         
-        return self.is_reverse([int2string[int(m)] for m in predicted_intseq if m not in dont_show])
+        return self.is_reverse([int2string[int(m)] for m in predicted_intseq if m not in dont_show]), predicted_intseq
 
-    def make_prediction(self, inputs: ndarray):
+    def make_prediction(self, inputs: ndarray, target: th.tensor):
         batch = self.hx(inputs)
         kwargs = {'save_x': True, 'save_p': True, 'progress': False, 'n': 1, 'top': 1, 'return_full': False}
         out_dict = self.D.model.predict_sequence(batch, **kwargs)
         reveal_steps = self.D.model.get_reveal_steps(out_dict['x_save']) # bs, sl
         predicted_logit = out_dict['p_save'].gather(
-            -1, out_dict['prediction'][:,None,:,None].tile([1,self.diffusion_steps,1,1])
+                -1, target[:,None,:,None].tile([*out_dict['p_save'].shape[:2],1,1])
         )[...,0].gather(
             1, reveal_steps[:, None]
         )[:,0]
+        if self.D.reverse:
+            predicted_logit = th.flip(predicted_logit, dims=(-1,))
+            if target[0,-1]==self.D.model.decoder.outdict['<EOS>']:
+                predicted_logit = predicted_logit[:,1:]
         return predicted_logit
 
 model_wrappers = {

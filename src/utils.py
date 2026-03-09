@@ -88,6 +88,8 @@ def match(split_aa_sequence, charge, real_masses, IONS_kwargs={}, threshold=10, 
 
 def sort_array(array, axis_index, descending=False, sub_values=None, first=None):
     ndim = len(array.shape)
+    original_dtype = type(array.flatten()[0])
+    array = array.astype(float)
 
     # Put sub value in
     if sub_values is not None:
@@ -107,6 +109,7 @@ def sort_array(array, axis_index, descending=False, sub_values=None, first=None)
     if first is not None:
         argsort = argsort[:first]
     
+    array = array.astype(original_dtype)
     if ndim==1:
         return array[argsort]
     elif ndim==2:

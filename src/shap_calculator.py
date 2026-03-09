@@ -13,6 +13,7 @@ from src.models.model_wrappers import ModelWrapper, model_wrappers
 import src.utils as U
 from tqdm import tqdm
 import re
+DTYPE = "<U30"
 
 class ShapCalculator:
     def __init__(
@@ -37,6 +38,7 @@ class ShapCalculator:
         self.inputs_ignored = inputs_ignored
         self.batch_size = batch_size
         self.blank_token = blank_token
+        self.dtype = DTYPE
 
         self.bgd_size = bgd.shape[0]
 
@@ -48,7 +50,7 @@ class ShapCalculator:
             self.process_peptide_sequences(peptides)
 
     def process_spectra(self):
-        entire_dataset = np.zeros(( len(self.val), 2, self.max_len + self.inputs_ignored ))
+        entire_dataset = np.full(( len(self.val), 2, self.max_len + self.inputs_ignored ), '0', dtype=self.dtype)
         pbar = tqdm(self.val.items(), total=len(self.val))
         for iloc, (loc, linear_input) in enumerate(pbar):
             pbar.set_description("Processing dataset into numpy tensors")
@@ -61,7 +63,7 @@ class ShapCalculator:
             
             # Place sorted spectrum inside new variable
             actual_length = spectrum.shape[1]
-            tensor = np.zeros((2, self.max_len + self.inputs_ignored))
+            tensor = np.full((2, self.max_len + self.inputs_ignored), '0', dtype=self.dtype)
             tensor[:, :actual_length] = spectrum
             tensor[0, -self.inputs_ignored:] = other
 
@@ -103,7 +105,7 @@ class ShapCalculator:
         character, which was an issue for modified amino acid strings.
         """
         #out = np.tile(np.array(2, SL*[self.blank_token], dtype=np.float32)[None], [BS,1])
-        out = np.tile(np.array(SL*[self.blank_token], dtype=np.float32)[None, None], [BS,2,1])
+        out = np.tile(np.array(SL*[self.blank_token], dtype=DTYPE)[None, None], [BS,2,1])
         zsexp = np.tile(zs[:,None], [1,2,1])
         if mask:
             
@@ -170,7 +172,7 @@ class ShapCalculator:
             inp = self.mask_pep(batch, self.input_orig, bgd_inds, mask)
 
             # Run through model
-            out = self.model_wrapper.make_prediction(inp)
+            out = self.model_wrapper.make_prediction(inp, target=self.target)
             out_.append(out.cpu().numpy())
 
         out_ = np.concatenate(out_, axis=0)
@@ -193,7 +195,7 @@ class ShapCalculator:
 
         # spectrum length for the current peptide
         num_ignored = self.inputs_ignored
-        spectrum_length = sum(input_orig[0, 0, :-num_ignored] != self.blank_token)
+        spectrum_length = sum(input_orig[0, 0, :-num_ignored] != str(self.blank_token))
         shap_vector_length = spectrum_length + num_ignored
 
         # Input coalition vector: All peaks on (1) + charge + mass
@@ -203,7 +205,8 @@ class ShapCalculator:
         # Get model's predicted peptide 
         # - Reminder: diffusion models are non-deterministic
         max_length = len(kwargs['peptide'])+1 if 'peptide' in kwargs else None
-        predicted_aa_list = self.model_wrapper.predict_peptide(self.input_orig, max_length=max_length)
+        predicted_aa_list, predicted_intseq = self.model_wrapper.predict_peptide(self.input_orig, max_length=max_length)
+        self.target = predicted_intseq[None]
         #print(f"Predicted peptide: {''.join(predicted_aa_list)}")
         if 'peptide' in kwargs:
             correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', "".join(kwargs['peptide']))
@@ -229,7 +232,7 @@ class ShapCalculator:
         return {
             "mz": input_orig[0, 0, :-self.inputs_ignored].astype(np.float32),
             "intensity": input_orig[0, 1, :-self.inputs_ignored].astype(np.float32),
-            "charge": int(input_orig[0, 0, -2]),
+            "charge": int(float(input_orig[0, 0, -2])),
             "mass": float(input_orig[0, 0, -1]),
             "pred_aaseq": predicted_aa_list,
             "shap_values": pd.DataFrame(shap_values_, columns=self.mode),
@@ -303,10 +306,10 @@ def save_shap_values(
     bgd = np.stack(bgd['full'])
     val = np.stack(val_data.loc[remaining_indices]['full'])
     """
-    val = val_data['full']
+    val = val_data['full'].map(lambda x: np.array(x.split(','), dtype=DTYPE))
     peptides = val_data['modified_sequence'].to_list()
     tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.D.data.tokenizer(x)).to_list()
-    bgd = np.zeros((1, max_peaks))
+    bgd = np.full((1, max_peaks), model_wrapper.blank_token, dtype=DTYPE)
 
     # NOTE: sequence length can be different than peptide length
     max_input_length = max_peaks #val.shape[1] - inputs_ignored
@@ -346,7 +349,7 @@ def save_shap_values(
         shap_values = out_dict.pop("shap_values")
         for column in shap_values:
             ind_col_name = f"sv_indices_{column}"
-            mode_indices = np.where(shap_values[column] != sc.blank_token)[0].astype(np.int16)
+            mode_indices = np.where(shap_values[column] != 0)[0].astype(np.int16)
             shap_results[ind_col_name] = mode_indices
             sv_col_name = f"sv_values_{column}"
             mode_shap_values = shap_values[column].iloc[mode_indices].to_numpy().astype(np.float32)
