@@ -22,19 +22,4 @@ shap_calculator:
     local:
       model_path: "/cmnfs/proj/diffusion/experiments/2026-02-26_14-13-22" # read
       diffusion_steps: 1
-  
-shap_visualization:
-  mode: y5 # setting
-  sv_path: /cmnfs/proj/shabaz/shap/shabaz/EID/output.parquet # read
-  out_path: test/y5 # write
-  save_tokenframe: True # write
-  filter_expr: # setting
-  bitoken: False # setting
-  position_combos: # setting
-    - [0,1]
-    - [-1,0]
-    - [0,4]
-  clustering: # setting
-    run: False
-    from_which_end: right
-    number_of_aa: 6
+
