@@ -69,10 +69,6 @@ class ShapCalculator:
 
             entire_dataset[iloc] = tensor
         
-        if dtype == '<U30':
-            entire_dataset[entire_dataset==''] = '0'
-            self.blank_token = '0'
-        
         self.val = entire_dataset
 
     def process_peptide_sequences(self, peptides):

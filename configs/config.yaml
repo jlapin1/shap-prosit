@@ -21,5 +21,5 @@ shap_calculator:
       ssl: False # setting
     local:
       model_path: "/cmnfs/proj/diffusion/experiments/2026-02-26_14-13-22" # read
-      diffusion_steps: 1
+      diffusion_steps: 0
 
