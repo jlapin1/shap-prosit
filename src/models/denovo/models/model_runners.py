@@ -30,9 +30,9 @@ class BaseDenovo:
         self.header = "HEADER"#config['header']
         if self.log and not os.path.exists(svdir):
             os.makedirs(svdir)
-        if self.config['save_weights']:
-            if not os.path.exists(os.path.join(svdir, 'weights')):
-                os.mkdir(os.path.join(svdir, 'weights'))
+        #if self.config['save_weights']:
+        #    if not os.path.exists(os.path.join(svdir, 'weights')):
+        #        os.mkdir(os.path.join(svdir, 'weights'))
         self.svdir = svdir
         self.rddir = rddir
         self.config['sl'] = self.config['pep_length'][1]
