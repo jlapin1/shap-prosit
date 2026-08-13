@@ -618,7 +618,7 @@ class MDLM(ModelWrapper):
         spectrum = twod_inputs[..., :-self.ignored_inputs].astype(float)
         mz = th.tensor(spectrum[:, 0], dtype=th.float32, device=device)
         ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
-        ab /= ab.max()
+        ab /= ab.max() + 1e-9
         other = twod_inputs[:, 0, -self.ignored_inputs:]
         if self.D.model.decoder.use_charge:
             # Assume first other is charge
@@ -658,7 +658,7 @@ class MDLM(ModelWrapper):
         out_dict = self.D.model.predict_sequence(batch, **kwargs)
         reveal_steps = self.D.model.get_reveal_steps(out_dict['x_save']) # bs, sl
         predicted_logit = out_dict['p_save'].gather(
-                -1, target[:,None,:,None].tile([*out_dict['p_save'].shape[:2],1,1])
+            -1, target[:,None,:,None].tile([*out_dict['p_save'].shape[:2],1,1])
         )[...,0].gather(
             1, reveal_steps[:, None]
         )[:,0]

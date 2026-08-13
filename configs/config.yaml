@@ -1,8 +1,8 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/proj/shap-prosit/data/denovo/bioplex.parquet" # read
-    output_dir: bioplex # write
+    val_data_path: "/cmnfs/proj/shap_denovo/test.parquet" # read
+    output_dir: test # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
     bgd_sz: 100 # setting
@@ -11,6 +11,7 @@ shap_calculator:
       - "method == 'HCD'"
     bgd_queries: # setting
       - "peptide_length > 9"
+    which: correct # None = everything, correct = correct predictions, incorrect = incorrect predictions
   
   # Reconstituting a saved torch model
   model_settings:

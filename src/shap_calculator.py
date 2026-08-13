@@ -1,14 +1,13 @@
+import sys;import os;sys.path.append(os.getcwd())
 import logging
-import os
-import sys
 from typing import Union, List
 
+import torch
 import pandas as pd
 import numpy as np
 import yaml
 from numpy.typing import NDArray
 import shap
-sys.path.append(os.getcwd())
 from src.models.model_wrappers import ModelWrapper, model_wrappers
 import src.utils as U
 from tqdm import tqdm
@@ -204,13 +203,26 @@ class ShapCalculator:
         
         # Get model's predicted peptide 
         # - Reminder: diffusion models are non-deterministic
-        max_length = len(kwargs['peptide'])+1 if 'peptide' in kwargs else None
+        max_length = len(kwargs['correct_peptide'])+1 if 'correct_peptide' in kwargs else None 
         predicted_aa_list, predicted_intseq = self.model_wrapper.predict_peptide(self.input_orig, max_length=max_length)
-        self.target = predicted_intseq[None]
-        #print(f"Predicted peptide: {''.join(predicted_aa_list)}")
-        if 'peptide' in kwargs:
-            correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', "".join(kwargs['peptide']))
-            if not correct:
+        
+        # Set the target intseq vector in its raw form, i.e. possibly reversed with EOS on the right end.
+        if 'explain_peptide' in kwargs and kwargs['explain_peptide'] is not None:
+            outdict = self.model_wrapper.D.model.decoder.outdict
+            explain_peptide = self.model_wrapper.is_reverse(kwargs['explain_peptide']) # reverse?
+            explain_intseq = [outdict[aa] for aa in explain_peptide] + [outdict['<EOS>']]
+            self.model_wrapper.D.model.decoder.diff_obj.SL = len(explain_intseq)
+            self.target = torch.tensor(explain_intseq, dtype=torch.int64, device=predicted_intseq.device)[None]
+        else:
+            self.model_wrapper.D.model.decoder.diff_obj.SL = max_length # also set in model_wrapper.predict_peptide
+            self.target = predicted_intseq[None]
+        
+        # Which types of solutions to run SHAP for
+        if (config_['which'] is not None) and ('correct_peptide' in kwargs):
+            correct = re.sub('I', 'L', ''.join(predicted_aa_list)) == re.sub('I', 'L', "".join(kwargs['correct_peptide']))
+            if (config_['which'].lower() == 'incorrect') and correct:
+                return False
+            elif (config_['which'].lower() == 'correct') and (correct==False):
                 return False
 
         # Mask vector is peptide length all off
@@ -260,55 +272,14 @@ def save_shap_values(
     val_data = pd.read_parquet(val_data_path)
     original_size = val_data.shape[0]
     
-    """
-    # Load existing split BEFORE querying dataset
-    if bgd_loc_path is not None:
-        print("<<<ATTN>>> Loading existing bgd split")
-        loc_inds = np.loadtxt(bgd_loc_path).astype(int)
-        bgd = val_data.loc[loc_inds]
-    
-    # Query dataset
-    if dataset_queries is not None:
-        query_expression = " and ".join(dataset_queries)
-        print(f"<<<ATTN>>> Querying dataset of size {original_size} with expression: '{query_expression}'")
-        val_data = val_data.query(query_expression)
-        new_size = val_data.shape[0]
-        print(f"<<<ATTN>>> Dataset now has size {val_data.shape[0]}")
-        if (new_size == original_size) or (new_size == 0):
-            print("<<<ATTN>>> WARNING query didn't do anything, or it did too much")
-        print(val_data)
-    
-    # Create a new split (if not loading existing)
-    if bgd_loc_path is None:
-        print("<<<ATTN>>> Creating new bgd split")
-        if bgd_queries is not None:
-            query_expression = " and ".join(bgd_queries)
-            print(f"<<<ATTN>>> Querying bgd dataset with expression: '{query_expression}'")
-            bgd = val_data.query(query_expression)
-        else:
-            bgd = val_data
-        bgd = bgd.sample(bgd_size)
-    
-    # Save splits
-    bgd_indices = bgd.index.values.tolist()
-    np.savetxt(output_path + "/bgd_loc_indices.txt", bgd_indices, fmt="%d")
-    remaining_indices = val_data.index.values.tolist()
-    for index in bgd_indices: 
-        try:
-            remaining_indices.remove(index)
-        except:
-            # This can happen if you load an existing bgd split, but querying
-            # the dataset get rid of those bgd loc indices
-            pass
-    np.savetxt(output_path + "/val_loc_indices.txt", remaining_indices, fmt='%d')
-    
-    # Convert full column to numpy arrays
-    bgd = np.stack(bgd['full'])
-    val = np.stack(val_data.loc[remaining_indices]['full'])
-    """
     val = val_data['full'].map(lambda x: np.array(x.split(','), dtype=DTYPE))
-    peptides = val_data['modified_sequence'].to_list()
-    tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.D.data.tokenizer(x)).to_list()
+    correct_peptides = val_data['modified_sequence'].to_list()
+    correct_tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.D.data.tokenizer(x)).to_list()
+    # backwards compat.
+    if 'explain_sequence' not in val_data.keys():
+        val_data['explain_sequence'] = len(val_data) * [""]
+    explain_peptides = val_data['explain_sequence'].to_list()
+    explain_tokenized = val_data['explain_sequence'].map(lambda x: None if x == '' else model_wrapper.D.data.tokenizer(x)).to_list()
     bgd = np.full((1, max_peaks), model_wrapper.blank_token, dtype=DTYPE)
 
     # NOTE: sequence length can be different than peptide length
@@ -317,7 +288,7 @@ def save_shap_values(
     sc = ShapCalculator(
         val, 
         bgd,
-        peptides=peptides,
+        peptides=correct_peptides,
         model_wrapper=model_wrapper,
         batch_size=batch_size,
         inputs_ignored=inputs_ignored,
@@ -339,7 +310,7 @@ def save_shap_values(
         Samp = base_samp
 
         # Calculate shapley values
-        out_dict = sc.calc_shap_values(sequence, samp=Samp, peptide=tokenized[INDEX])
+        out_dict = sc.calc_shap_values(sequence, samp=Samp, correct_peptide=correct_tokenized[INDEX], explain_peptide=explain_tokenized[INDEX])
         if out_dict == False:
             continue
         # add to out_dict to include in output
@@ -364,8 +335,8 @@ def save_shap_values(
         else:
             addons = {}
 
-
-        new_dict = out_dict | shap_results | addons
+        explain_peptide = out_dict['pred_aaseq'] if explain_tokenized[INDEX]=='' else explain_tokenized[INDEX]
+        new_dict = out_dict | shap_results | addons | {'explain_aaseq': explain_tokenized[INDEX]}
 
         # Save results
         if new_dict != False:
