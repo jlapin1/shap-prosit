@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from operator import itemgetter
 import sys
-sys.path.append("/cmnfs/home/j.lapin/projects/shabaz/data")
+sys.path.append("/cmnfs/home/j.lapin/materials")
 from mass_scale import Scale, tiebreak
 scale = Scale()
 IMMONIUM_IONS = [key for key in scale.mass.keys() if (key[0]=='I')&(len(key)==3)] + ['ICCAM']
@@ -28,7 +28,7 @@ def IONS(
     max_length, 
     max_charge, 
     ion_series=['b', 'y'], 
-    neutral_losses=[],
+    neutrals=[],
     internal_neutral_losses=[],
     add_immonium=False, 
     add_precursor=False,
@@ -39,15 +39,15 @@ def IONS(
     ions = []
     charges  = [f'^{c}' for c in range(1, max_charge+1, 1)]
     charges[0]=''
-    neutral_losses_ =  [''] + neutral_losses
+    neutrals_ =  [''] + neutrals
     isotopes = [f"+{i}i" if i>1 else ('+i' if i==1 else '') for i in range(0,isotope_degree+1,1)]
     for ion in ion_series:
         for length in range(1, max_length, 1):
             for charge in charges:
-                for nl in neutral_losses_:
+                for nl in neutrals_:
                     for isotope in isotopes:
                         
-                        nl_ = '-' + nl if nl != '' else nl
+                        nl_ = nl#'-' + nl if nl != '' else nl
                         ions.append(f"{ion}{length}{nl_}{charge}{isotope}")
     if add_immonium:
         ions.extend(IMMONIUM_IONS)
