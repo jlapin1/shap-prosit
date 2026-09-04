@@ -82,8 +82,8 @@ class ShapCalculator:
         pbar = tqdm(peptides)
         for i, peptide in enumerate(pbar):
             pbar.set_description("Processing peptide sequences")
-            tokenized_sequence = model_wrapper.D.data.tokenizer(peptide)
-            intseq = [self.model_wrapper.D.data.amod_dic[m] for m in tokenized_sequence]
+            tokenized_sequence = self.model_wrapper.tokenizer(peptide)
+            intseq = [self.model_wrapper.token2int[m] for m in tokenized_sequence]
             
             #matched_ions, matched_mzs, matched_inds = U.match(peptide, int(self.val[i, 0, -2]), self.val[i, 0, :-self.inputs_ignored])
 
@@ -208,13 +208,13 @@ class ShapCalculator:
         
         # Set the target intseq vector in its raw form, i.e. possibly reversed with EOS on the right end.
         if 'explain_peptide' in kwargs and kwargs['explain_peptide'] is not None:
-            outdict = self.model_wrapper.D.model.decoder.outdict
+            outdict = self.model_wrapper.model.decoder.outdict
             explain_peptide = self.model_wrapper.is_reverse(kwargs['explain_peptide']) # reverse?
             explain_intseq = [outdict[aa] for aa in explain_peptide] + [outdict['<EOS>']]
-            self.model_wrapper.D.model.decoder.diff_obj.SL = len(explain_intseq)
+            self.model_wrapper.model.decoder.diff_obj.SL = len(explain_intseq)
             self.target = torch.tensor(explain_intseq, dtype=torch.int64, device=predicted_intseq.device)[None]
         else:
-            self.model_wrapper.D.model.decoder.diff_obj.SL = max_length # also set in model_wrapper.predict_peptide
+            self.model_wrapper.model.decoder.diff_obj.SL = max_length # also set in model_wrapper.predict_peptide
             self.target = predicted_intseq[None]
         
         # Which types of solutions to run SHAP for
@@ -274,12 +274,12 @@ def save_shap_values(
     
     val = val_data['full'].map(lambda x: np.array(x.split(','), dtype=DTYPE))
     correct_peptides = val_data['modified_sequence'].to_list()
-    correct_tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.D.data.tokenizer(x)).to_list()
+    correct_tokenized = val_data['modified_sequence'].map(lambda x: model_wrapper.tokenizer(x)).to_list()
     # backwards compat.
     if 'explain_sequence' not in val_data.keys():
         val_data['explain_sequence'] = len(val_data) * [""]
     explain_peptides = val_data['explain_sequence'].to_list()
-    explain_tokenized = val_data['explain_sequence'].map(lambda x: None if x == '' else model_wrapper.D.data.tokenizer(x)).to_list()
+    explain_tokenized = val_data['explain_sequence'].map(lambda x: None if x == '' else model_wrapper.tokenizer(x)).to_list()
     bgd = np.full((1, max_peaks), model_wrapper.blank_token, dtype=DTYPE)
 
     # NOTE: sequence length can be different than peptide length
@@ -335,8 +335,8 @@ def save_shap_values(
         else:
             addons = {}
 
-        explain_peptide = out_dict['pred_aaseq'] if explain_tokenized[INDEX]=='' else explain_tokenized[INDEX]
-        new_dict = out_dict | shap_results | addons | {'explain_aaseq': explain_tokenized[INDEX]}
+        explain_peptide = out_dict['pred_aaseq'] if explain_tokenized[INDEX]==None else explain_tokenized[INDEX]
+        new_dict = out_dict | shap_results | addons | {'explain_aaseq': explain_peptide}
 
         # Save results
         if new_dict != False:

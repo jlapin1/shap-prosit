@@ -8,7 +8,7 @@ Converting the SHAP linearized numpy string array input
 e.g. [seq,charge,energy,method] to model ready outputs is done
 using the function def hx(inputs).
 """
-
+import sys
 import os
 from abc import ABC, abstractmethod
 from time import sleep
@@ -597,21 +597,29 @@ class MDLM(ModelWrapper):
         self.ignored_inputs = ignored_inputs
         self.blank_token = blank_token
         self.diffusion_steps = diffusion_steps
-
-        from .denovo.main import DenovoMDLMObj
-        
+       
         with open(os.path.join(model_path, "yaml/config.yaml")) as stream:
             config = yaml.safe_load(stream)
         
-        config['prev_wts'] = model_path
-        config['load_last'] = False
-        rddir = config['prev_wts']
-        config['loader']['val_name'] = 'test'
-        D = DenovoMDLMObj(config, svdir='./', rddir=rddir)
-        D.model.eval()
-        D.model.decoder.diff_obj.steps = diffusion_steps
-        self.D = D
-        self.is_reverse = lambda listseq: listseq[::-1] if D.reverse else listseq
+        # Tokenizer
+        sys.path.append(config['loader']['train_dataset_path'])
+        from enumerate_tokens import partition_modified_sequence
+        self.tokenizer = partition_modified_sequence
+
+        # Model
+        from .denovo.load_standalone_model import load_model
+        import torch
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = load_model(model_path, 'weights/*high*', device)
+        self.model.eval()
+        self.model.diff_obj.steps = diffusion_steps
+        self.reverse = config['loader']['reverse']
+
+        # Dictionary
+        self.token2int = self.model.decoder.outdict
+        self.int2token = self.model.decoder.rev_outdict
+
+        self.is_reverse = lambda listseq: listseq[::-1] if self.reverse else listseq
 
     def hx(self, twod_inputs: ndarray) -> dict:
         # mz, ab, charge, mass, length (spectrum)
@@ -620,10 +628,10 @@ class MDLM(ModelWrapper):
         ab = th.tensor(spectrum[:, 1], dtype=th.float32, device=device)
         ab /= ab.max() + 1e-9
         other = twod_inputs[:, 0, -self.ignored_inputs:]
-        if self.D.model.decoder.use_charge:
+        if self.model.decoder.use_charge:
             # Assume first other is charge
             charge = th.tensor(other[:, 0].astype(float), dtype=th.int32, device=device)
-        if self.D.model.decoder.use_mass:
+        if self.model.decoder.use_mass:
             # Assume second other is mass
             mass = th.tensor(other[:, 1].astype(float), dtype=th.float32, device=device)
         length = (mz != self.blank_token).sum(1)
@@ -643,11 +651,11 @@ class MDLM(ModelWrapper):
         # Make the prediction faster by setting the maxlen to the length of the peptide
         if max_length is not None:
             #self.D.model.decoder.max_sl = max_length
-            self.D.model.decoder.diff_obj.SL = max_length
-        predicted_intseq = self.D.model.predict_sequence(batch, **kwargs)['prediction'].squeeze()
+            self.model.decoder.diff_obj.SL = max_length
+        predicted_intseq = self.model.predict_sequence(batch, **kwargs)['prediction'].squeeze()
         
-        string2int = self.D.model.decoder.outdict
-        int2string = self.D.model.decoder.rev_outdict
+        string2int = self.model.decoder.outdict
+        int2string = self.model.decoder.rev_outdict
         dont_show = [string2int['X'], string2int['<EOS>'], string2int['<MASK>']]
         
         return self.is_reverse([int2string[int(m)] for m in predicted_intseq if m not in dont_show]), predicted_intseq
@@ -655,16 +663,16 @@ class MDLM(ModelWrapper):
     def make_prediction(self, inputs: ndarray, target: th.tensor):
         batch = self.hx(inputs)
         kwargs = {'save_x': True, 'save_p': True, 'progress': False, 'n': 1, 'top': 1, 'return_full': False}
-        out_dict = self.D.model.predict_sequence(batch, **kwargs)
-        reveal_steps = self.D.model.get_reveal_steps(out_dict['x_save']) # bs, sl
+        out_dict = self.model.predict_sequence(batch, **kwargs)
+        reveal_steps = self.model.get_reveal_steps(out_dict['x_save']) # bs, sl
         predicted_logit = out_dict['p_save'].gather(
             -1, target[:,None,:,None].tile([*out_dict['p_save'].shape[:2],1,1])
         )[...,0].gather(
             1, reveal_steps[:, None]
         )[:,0]
-        if self.D.reverse:
+        if self.reverse:
             predicted_logit = th.flip(predicted_logit, dims=(-1,))
-            if target[0,-1]==self.D.model.decoder.outdict['<EOS>']:
+            if target[0,-1]==self.model.decoder.outdict['<EOS>']:
                 predicted_logit = predicted_logit[:,1:]
         return predicted_logit
 

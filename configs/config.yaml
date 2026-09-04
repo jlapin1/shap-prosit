@@ -1,7 +1,7 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/proj/shap_denovo/test.parquet" # read
+    val_data_path: "/cmnfs/proj/shap-prosit/data/denovo/bioplex.parquet" # read
     output_dir: test # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
     base_samp: 100000 # setting
@@ -21,6 +21,6 @@ shap_calculator:
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/diffusion/experiments/2026-03-06_22-58-14" # read
+      model_path: "/cmnfs/proj/diffusion/experiments/2026-08-14_15-59-32" # read
       diffusion_steps: 0
 
