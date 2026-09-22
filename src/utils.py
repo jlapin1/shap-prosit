@@ -22,6 +22,8 @@ def convert_to_unimod(modseq):
     modseq = re.sub("\+0.984", "[UNIMOD:7]", modseq)
     modseq = re.sub("\-17.027", "[UNIMOD:28]", modseq)
     modseq = re.sub("\+15.995", "[UNIMOD:35]", modseq)
+    modseq = re.sub("\+79.966", "[UNIMOD:29]", modseq)
+    modseq = re.sub("\+114.043", "[UNIMOD:121]", modseq)
     return modseq
 
 def IONS(
