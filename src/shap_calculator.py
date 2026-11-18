@@ -57,7 +57,7 @@ class ShapCalculator:
             other = linear_input[-self.inputs_ignored:]
             
             # Top n peaks
-            spectrum = U.sort_array(spectrum, 1, descending=True, first=50)
+            spectrum = U.sort_array(spectrum, 1, descending=True, first=self.max_len)
             spectrum = U.sort_array(spectrum, 0)
             
             # Place sorted spectrum inside new variable

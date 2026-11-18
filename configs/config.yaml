@@ -1,17 +1,18 @@
 shap_calculator:
   # SHAP calculation settings
   shap_settings:
-    val_data_path: "/cmnfs/proj/shap-prosit/data/denovo/phosphorylation_shap.parquet" # read
-    output_dir: phospho2 # write
+    val_data_path: "/cmnfs/proj/shap-prosit/data/denovo/deduplicated/alternate_N2_seqs.parquet" # read
+    output_dir: alternateN2 # write
     bgd_loc_path: # read: Path or leave empty to generate and save new permutation
-    base_samp: 100000 # setting
+    base_samp: 100 # setting
     bgd_sz: 100 # setting
+    max_peaks: 50 # setting
     inputs_ignored: 2 # read/setting: Trailing attributes to ignore for explanations in input vector
     dataset_queries: # setting
       - "method == 'HCD'"
     bgd_queries: # setting
       - "peptide_length > 9"
-    which: correct # None = everything, correct = correct predictions, incorrect = incorrect predictions
+    which: # None = everything, correct = correct predictions, incorrect = incorrect predictions
   
   # Reconstituting a saved torch model
   model_settings:
@@ -21,6 +22,6 @@ shap_calculator:
       server_url: '10.162.163.66:9500' # setting
       ssl: False # setting
     local:
-      model_path: "/cmnfs/proj/diffusion/experiments/2026-09-15_14-01-56" # read
+      model_path: "/cmnfs/proj/diffusion/experiments/2026-08-14_15-59-32" # 2026-09-15_14-01-56" # read
       diffusion_steps: 0
 

@@ -37,6 +37,7 @@ def IONS(
     add_internals=False,
     isotope_degree=0,
     custom_adds=[],
+    custom_omits=[],
 ):
     ions = []
     charges  = [f'^{c}' for c in range(1, max_charge+1, 1)]
@@ -66,7 +67,9 @@ def IONS(
     for addon in custom_adds:
         if addon not in ions:
             ions.append(addon)
-    
+
+    if len(custom_omits)>0:
+        ions = [m for m in ions if m not in custom_omits]
     ions = np.array(ions)
     return ions
 
